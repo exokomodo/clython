@@ -34,7 +34,7 @@ test: ## Run unit tests
 
 .PHONY: conformance
 conformance: ## Run conformance test suite against Clython
-	@cd tests/conformance && CLYTHON_BIN=$(CURDIR)/bin/clython python3 -m pytest tests/ -v --tb=short 2>&1 || true
+	@cd tests/conformance && CLYTHON_BIN=$(CURDIR)/bin/clython python3 -m pytest tests/ -v --tb=short
 
 .PHONY: repl
 repl: ## Start interactive Clython REPL

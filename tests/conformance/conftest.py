@@ -57,17 +57,10 @@ def clython():
 
 
 def pytest_collection_modifyitems(config, items):
-    """When CLYTHON_BIN is set, skip all tests that aren't in clython-specific
-    test files — those use ast.parse/eval/exec against CPython directly."""
-    if not CLYTHON_BIN:
-        return
-    skip_cpython = pytest.mark.skip(
-        reason="CPython-native test skipped when CLYTHON_BIN is set"
-    )
-    for item in items:
-        # Only run tests from files that are Clython-aware
-        if "test_clython_" not in item.fspath.basename:
-            item.add_marker(skip_cpython)
+    """No-op — all tests run regardless of CLYTHON_BIN setting.
+    CPython-native tests validate the spec baseline; Clython-specific
+    tests validate the interpreter."""
+    pass
 
 
 def pytest_runtest_setup(item):
