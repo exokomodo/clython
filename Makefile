@@ -32,9 +32,13 @@ build: ## Load and compile Clython
 test: ## Run unit tests
 	$(SBCL) --eval '(asdf:test-system :clython)' --eval '(quit)'
 
-.PHONY: conformance
-conformance: ## Run conformance test suite against Clython
-	@cd tests/conformance && CLYTHON_BIN=$(CURDIR)/bin/clython python3 -m pytest tests/ -v --tb=short
+.PHONY: conformance-cpython
+conformance-cpython: ## Run conformance test suite against CPython (baseline)
+	@cd tests/conformance && python3 -m pytest tests/ -v --tb=short --ignore=tests/conformance/test_clython_smoke.py
+
+.PHONY: conformance-clython
+conformance-clython: ## Run conformance test suite against Clython
+	@cd tests/conformance && CLYTHON_BIN=$(CURDIR)/bin/clython python3 -m pytest tests/conformance/test_clython_smoke.py -v --tb=short
 
 .PHONY: repl
 repl: ## Start interactive Clython REPL

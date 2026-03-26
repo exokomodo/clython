@@ -56,11 +56,7 @@ def clython():
     return None
 
 
-def pytest_collection_modifyitems(config, items):
-    """No-op — all tests run regardless of CLYTHON_BIN setting.
-    CPython-native tests validate the spec baseline; Clython-specific
-    tests validate the interpreter."""
-    pass
+
 
 
 def pytest_runtest_setup(item):

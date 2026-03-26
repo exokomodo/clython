@@ -6,8 +6,12 @@ env:
 
 jobs:
   conformance:
-    name: Conformance (informational)
+    name: Conformance (${{ matrix.target }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [cpython, clython]
     steps:
       - uses: actions/checkout@v6
 
@@ -22,10 +26,12 @@ jobs:
           pip install -e . || pip install pytest
 
       - name: Install SBCL
+        if: matrix.target == 'clython'
         run: sudo apt-get update && sudo apt-get install -y sbcl
 
       - name: Build Clython
+        if: matrix.target == 'clython'
         run: make build
 
       - name: Run conformance tests
-        run: make conformance
+        run: make conformance-${{ matrix.target }}
