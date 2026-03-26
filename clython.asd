@@ -9,6 +9,6 @@
                              (:file "lexer")
                              (:file "parser")
                              (:file "scope")
-                             (:file "builtins")
                              (:file "runtime")
+                             (:file "builtins")
                              (:file "clython")))))

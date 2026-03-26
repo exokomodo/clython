@@ -29,8 +29,8 @@ build: ## Load and compile Clython
 	$(SBCL) --eval '(asdf:load-system :clython)' --eval '(quit)'
 
 .PHONY: test
-test: ## Run unit tests
-	$(SBCL) --eval '(asdf:test-system :clython)' --eval '(quit)'
+test: ## Run CL unit tests
+	$(SBCL) --eval '(asdf:load-system :clython-tests)' --eval '(clython.test:run-all-tests)'
 
 .PHONY: conformance-cpython
 conformance-cpython: ## Run conformance test suite against CPython (baseline)
