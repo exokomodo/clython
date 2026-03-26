@@ -8,7 +8,7 @@
                 :components ((:file "ast")
                              (:file "lexer")
                              (:file "parser")
-                             (:file "scope")
                              (:file "runtime")
                              (:file "builtins")
+                             (:file "scope")
                              (:file "clython")))))
