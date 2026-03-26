@@ -33,8 +33,8 @@ test: ## Run unit tests
 	$(SBCL) --eval '(asdf:test-system :clython)' --eval '(quit)'
 
 .PHONY: conformance
-conformance: ## Run conformance test suite
-	@cd tests/conformance && python3 -m pytest tests/ -v --tb=short 2>&1 || true
+conformance: ## Run conformance test suite against Clython
+	@cd tests/conformance && CLYTHON_BIN=$(CURDIR)/bin/clython python3 -m pytest tests/ -v --tb=short 2>&1 || true
 
 .PHONY: repl
 repl: ## Start interactive Clython REPL

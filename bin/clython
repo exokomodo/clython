@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Clython CLI — runs Python source through the Common Lisp interpreter.
+#
+# Usage:
+#   clython -c "print('hello')"       # inline source
+#   clython script.py                  # file
+#   echo "1+2" | clython -             # stdin
+#
+# Exit codes:
+#   0  success
+#   1  runtime error
+#   2  syntax error
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+SBCL="${SBCL:-sbcl}"
+
+mode=""
+source_code=""
+source_file=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -c)
+            mode="inline"
+            source_code="$2"
+            shift 2
+            ;;
+        -)
+            mode="stdin"
+            source_code="$(cat)"
+            shift
+            ;;
+        --parse-only)
+            export CLYTHON_PARSE_ONLY=1
+            shift
+            ;;
+        *)
+            mode="file"
+            source_file="$1"
+            shift
+            ;;
+    esac
+done
+
+if [[ "$mode" == "file" ]]; then
+    source_code="$(cat "$source_file")"
+fi
+
+if [[ -z "$mode" ]]; then
+    # No args — REPL mode
+    exec "$SBCL" --noinform --non-interactive \
+        --eval '(require :asdf)' \
+        --eval "(push (truename \"$SCRIPT_DIR\") asdf:*central-registry*)" \
+        --eval '(asdf:load-system :clython)' \
+        --eval '(clython:repl)'
+fi
+
+parse_only="${CLYTHON_PARSE_ONLY:-0}"
+
+# Escape the source for embedding in a Lisp string
+escaped_source="$(printf '%s' "$source_code" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+
+if [[ "$parse_only" == "1" ]]; then
+    lisp_eval="(handler-case
+        (progn
+          (clython:py-parse \"$escaped_source\")
+          (format t \"PARSE_OK~%\"))
+        (clython:py-syntax-error (e)
+          (format *error-output* \"SyntaxError: ~A~%\" e)
+          (sb-ext:exit :code 2))
+        (error (e)
+          (format *error-output* \"Error: ~A~%\" e)
+          (sb-ext:exit :code 1)))"
+else
+    lisp_eval="(handler-case
+        (let ((result (clython:py-eval \"$escaped_source\")))
+          (when result
+            (format t \"~A~%\" result)))
+        (clython:py-syntax-error (e)
+          (format *error-output* \"SyntaxError: ~A~%\" e)
+          (sb-ext:exit :code 2))
+        (error (e)
+          (format *error-output* \"Error: ~A~%\" e)
+          (sb-ext:exit :code 1)))"
+fi
+
+exec "$SBCL" --noinform --non-interactive \
+    --eval '(require :asdf)' \
+    --eval "(push (truename \"$SCRIPT_DIR\") asdf:*central-registry*)" \
+    --eval '(asdf:load-system :clython)' \
+    --eval "$lisp_eval" \
+    --eval '(sb-ext:exit :code 0)'

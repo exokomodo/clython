@@ -1,8 +1,18 @@
 (defpackage :clython
   (:use :cl)
-  (:export #:repl #:py-eval))
+  (:export #:repl #:py-eval #:py-parse #:py-syntax-error))
 
 (in-package :clython)
+
+(define-condition py-syntax-error (error)
+  ((message :initarg :message :reader py-syntax-error-message))
+  (:report (lambda (c stream)
+             (format stream "~A" (py-syntax-error-message c)))))
+
+(defun py-parse (source)
+  "Parse a Python source string and return the AST."
+  (declare (ignore source))
+  (error 'py-syntax-error :message "Parser not yet implemented"))
 
 (defun py-eval (source)
   "Evaluate a Python source string and return the result."

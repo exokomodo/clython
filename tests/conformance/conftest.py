@@ -1,56 +1,96 @@
 """
 Pytest configuration for Python Language Reference Conformance Test Suite.
 
-Handles automatic skipping of tests based on Python version requirements
-using the marker system defined in pytest.ini.
+When CLYTHON_BIN is set, routes all execution through the Clython interpreter
+instead of CPython. This is the mechanism for testing Clython conformance.
 """
 
+import os
+import subprocess
 import sys
 import pytest
 
 
-def pytest_runtest_setup(item):
-    """Automatically skip tests based on version markers."""
-    
-    # Check for minimum version markers
-    for marker in item.iter_markers():
-        if marker.name.startswith('min_version_'):
-            # Extract version from marker name (e.g., min_version_3_6 -> (3, 6))
-            version_str = marker.name.replace('min_version_', '')
-            if '_' in version_str:
-                version_parts = version_str.split('_')
-                required_version = tuple(int(part) for part in version_parts)
-            else:
-                required_version = (int(version_str),)
-            
-            if sys.version_info < required_version:
-                pytest.skip(f"Requires Python {'.'.join(map(str, required_version))}+")
-        
-        # Feature-based markers
-        elif marker.name == 'feature_fstrings' and sys.version_info < (3, 6):
-            pytest.skip("F-strings require Python 3.6+")
-        elif marker.name == 'feature_walrus' and sys.version_info < (3, 8):
-            pytest.skip("Walrus operator requires Python 3.8+")
-        elif marker.name == 'feature_match' and sys.version_info < (3, 10):
-            pytest.skip("Match statements require Python 3.10+")
-        elif marker.name == 'feature_union_types' and sys.version_info < (3, 10):
-            pytest.skip("Union type syntax (X | Y) requires Python 3.10+")
-        elif marker.name == 'feature_async' and sys.version_info < (3, 5):
-            pytest.skip("Async/await requires Python 3.5+")
-        
-        # Implementation-specific markers
-        elif marker.name == 'cpython_only' and not hasattr(sys, '_getframe'):
-            pytest.skip("CPython-specific test")
-        elif marker.name == 'pypy_skip' and hasattr(sys, 'pypy_version_info'):
-            pytest.skip("Known PyPy compatibility issue")
+CLYTHON_BIN = os.environ.get("CLYTHON_BIN")
 
 
-def pytest_configure(config):
-    """Configure pytest markers."""
-    # Markers are already defined in pytest.ini
-    pass
+class ClythonRunner:
+    """Execute Python source through the Clython CLI."""
+
+    def __init__(self, bin_path: str):
+        self.bin_path = bin_path
+
+    def run(self, source: str, timeout: float = 30.0):
+        """Run source through Clython, return (stdout, stderr, returncode)."""
+        result = subprocess.run(
+            [self.bin_path, "-c", source],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return result.stdout, result.stderr, result.returncode
+
+    def parse(self, source: str, timeout: float = 30.0):
+        """Parse-only through Clython, return (stdout, stderr, returncode)."""
+        result = subprocess.run(
+            [self.bin_path, "--parse-only", "-c", source],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return result.stdout, result.stderr, result.returncode
+
+    def eval(self, source: str, timeout: float = 30.0):
+        """Evaluate an expression and return its string representation."""
+        stdout, stderr, rc = self.run(source, timeout)
+        if rc != 0:
+            raise RuntimeError(f"Clython eval failed (rc={rc}): {stderr}")
+        return stdout.strip()
+
+
+@pytest.fixture(scope="session")
+def clython():
+    """Provide a ClythonRunner if CLYTHON_BIN is set, else None."""
+    if CLYTHON_BIN:
+        return ClythonRunner(CLYTHON_BIN)
+    return None
 
 
 def pytest_collection_modifyitems(config, items):
-    """Modify test collection to add default markers where appropriate."""
-    pass
+    """When CLYTHON_BIN is set, skip all tests that aren't in clython-specific
+    test files — those use ast.parse/eval/exec against CPython directly."""
+    if not CLYTHON_BIN:
+        return
+    skip_cpython = pytest.mark.skip(
+        reason="CPython-native test skipped when CLYTHON_BIN is set"
+    )
+    for item in items:
+        # Only run tests from files that are Clython-aware
+        if "test_clython_" not in item.fspath.basename:
+            item.add_marker(skip_cpython)
+
+
+def pytest_runtest_setup(item):
+    """Automatically skip tests based on version markers."""
+    for marker in item.iter_markers():
+        if marker.name.startswith("min_version_"):
+            version_str = marker.name.replace("min_version_", "")
+            if "_" in version_str:
+                version_parts = version_str.split("_")
+                required_version = tuple(int(part) for part in version_parts)
+            else:
+                required_version = (int(version_str),)
+
+            if sys.version_info < required_version:
+                pytest.skip(f"Requires Python {'.'.join(map(str, required_version))}+")
+
+        elif marker.name == "feature_match" and sys.version_info < (3, 10):
+            pytest.skip("Match statements require Python 3.10+")
+        elif marker.name == "feature_walrus" and sys.version_info < (3, 8):
+            pytest.skip("Walrus operator requires Python 3.8+")
+        elif marker.name == "feature_fstrings" and sys.version_info < (3, 6):
+            pytest.skip("F-strings require Python 3.6+")
+        elif marker.name == "cpython_only" and not hasattr(sys, "_getframe"):
+            pytest.skip("CPython-specific test")
+        elif marker.name == "pypy_skip" and hasattr(sys, "pypy_version_info"):
+            pytest.skip("Known PyPy compatibility issue")

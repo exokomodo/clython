@@ -39,5 +39,8 @@ jobs:
       - name: Install SBCL
         run: sudo apt-get update && sudo apt-get install -y sbcl
 
+      - name: Build Clython (for conformance)
+        run: make build
+
       - name: Run conformance tests
         run: make conformance
