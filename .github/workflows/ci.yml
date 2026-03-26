@@ -5,13 +5,26 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  test:
+  ci:
+    name: Build & Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Install SBCL
         run: sudo apt-get update && sudo apt-get install -y sbcl
+
+      - name: Build
+        run: make build
+
+      - name: Unit Tests
+        run: make test
+
+  conformance:
+    name: Conformance (informational)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -23,8 +36,8 @@ jobs:
           cd tests/conformance
           pip install -e . || pip install pytest
 
-      - name: Run unit tests
-        run: make test || echo "No unit tests yet"
+      - name: Install SBCL
+        run: sudo apt-get update && sudo apt-get install -y sbcl
 
       - name: Run conformance tests
         run: make conformance
