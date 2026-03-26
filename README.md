@@ -18,10 +18,15 @@ src/
 └── clython.lisp      # Main interface + REPL
 ```
 
+## Target
+
+Clython targets **Python 3.12** semantics. The conformance test suite is pinned
+to CPython 3.12.x.
+
 ## Requirements
 
 - SBCL (Steel Bank Common Lisp)
-- Python 3.10+ (for conformance test runner)
+- Python 3.12 (for conformance test runner)
 - GNU Make
 
 ## Usage
@@ -29,7 +34,8 @@ src/
 ```bash
 make setup       # Install dependencies
 make test        # Run unit tests
-make conformance # Run conformance test suite
+make conformance-clython  # Run conformance tests against Clython
+make conformance-cpython  # Run conformance tests against CPython (baseline)
 make repl        # Interactive Clython REPL
 ```
 
