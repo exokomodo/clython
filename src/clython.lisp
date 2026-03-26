@@ -1,3 +1,5 @@
+;;;; clython.lisp — Main entry point for the Clython interpreter
+
 (defpackage :clython
   (:use :cl)
   (:export #:repl #:py-eval #:py-parse #:py-syntax-error))
@@ -19,9 +21,10 @@
                :message (format nil "~A" e))))))
 
 (defun py-eval (source)
-  "Evaluate a Python source string and return the result."
-  (declare (ignore source))
-  (error "Not yet implemented"))
+  "Evaluate a Python source string. Returns the last expression value (as a py-object)."
+  (let* ((ast (py-parse source))
+         (env (clython.scope:make-global-env)))
+    (clython.eval:eval-node ast env)))
 
 (defun repl ()
   "Start an interactive Clython REPL."
@@ -34,7 +37,11 @@
       (when (or (eq line :eof)
                 (string= line "(quit)"))
         (return))
-      (handler-case
-          (format t "~A~%" (py-eval line))
-        (error (e)
-          (format t "Error: ~A~%" e))))))
+      (unless (string= (string-trim '(#\Space #\Tab) line) "")
+        (handler-case
+            (let ((result (py-eval line)))
+              ;; Print result if it's not None (like Python interactive mode)
+              (unless (eq result clython.runtime:+py-none+)
+                (format t "~A~%" (clython.runtime:py-repr result))))
+          (error (e)
+            (format t "Error: ~A~%" e)))))))
