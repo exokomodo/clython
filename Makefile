@@ -5,7 +5,7 @@ SHELL := /bin/bash
 .SILENT:
 MAKEFLAGS += --no-print-directory
 
-SBCL := sbcl --noinform --non-interactive
+SBCL := sbcl --noinform --non-interactive --eval '(require :asdf)'
 
 .PHONY: help
 help: ## Show available targets
