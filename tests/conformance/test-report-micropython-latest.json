@@ -1,0 +1,12 @@
+{
+    "summary": {
+        "total": 34,
+        "passed": 34,
+        "failed": 0,
+        "skipped": 0,
+        "error": 0
+    },
+    "micropython_syntax_validation": true,
+    "success_rate": 100.0,
+    "note": "Basic syntax validation due to MicroPython stdlib limitations"
+}

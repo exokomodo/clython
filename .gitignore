@@ -1,17 +1,16 @@
-*.FASL
+# SBCL compiled files
 *.fasl
-*.lisp-temp
-*.dfsl
-*.pfsl
-*.d64fsl
-*.p64fsl
-*.lx64fsl
-*.lx32fsl
-*.dx64fsl
-*.dx32fsl
-*.fx64fsl
-*.fx32fsl
-*.sx64fsl
-*.sx32fsl
-*.wx64fsl
-*.wx32fsl
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Editor
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store

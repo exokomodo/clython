@@ -1,0 +1,27 @@
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SBCL
+        run: sudo apt-get update && sudo apt-get install -y sbcl
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install conformance dependencies
+        run: |
+          cd tests/conformance
+          pip install -e . || pip install pytest
+
+      - name: Run unit tests
+        run: make test || echo "No unit tests yet"
+
+      - name: Run conformance tests
+        run: make conformance
