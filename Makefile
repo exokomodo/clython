@@ -5,7 +5,7 @@ SHELL := /bin/bash
 .SILENT:
 MAKEFLAGS += --no-print-directory
 
-SBCL := sbcl --noinform --non-interactive --eval '(require :asdf)'
+SBCL := sbcl --noinform --non-interactive --eval '(require :asdf)' --eval '(push (truename ".") asdf:*central-registry*)'
 
 .PHONY: help
 help: ## Show available targets
@@ -26,11 +26,11 @@ setup: ## Install SBCL and Python dependencies
 
 .PHONY: build
 build: ## Load and compile Clython
-	$(SBCL) --load clython.asd --eval '(asdf:load-system :clython)' --eval '(quit)'
+	$(SBCL) --eval '(asdf:load-system :clython)' --eval '(quit)'
 
 .PHONY: test
 test: ## Run unit tests
-	$(SBCL) --load clython.asd --eval '(asdf:test-system :clython)' --eval '(quit)'
+	$(SBCL) --eval '(asdf:test-system :clython)' --eval '(quit)'
 
 .PHONY: conformance
 conformance: ## Run conformance test suite
@@ -38,7 +38,7 @@ conformance: ## Run conformance test suite
 
 .PHONY: repl
 repl: ## Start interactive Clython REPL
-	$(SBCL) --load clython.asd --eval '(asdf:load-system :clython)' --eval '(clython:repl)'
+	$(SBCL) --eval '(asdf:load-system :clython)' --eval '(clython:repl)'
 
 .PHONY: clean
 clean: ## Remove build artifacts
