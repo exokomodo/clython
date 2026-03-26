@@ -11,8 +11,12 @@
 
 (defun py-parse (source)
   "Parse a Python source string and return the AST."
-  (declare (ignore source))
-  (error 'py-syntax-error :message "Parser not yet implemented"))
+  (let ((tokens (clython.lexer:tokenize source)))
+    (handler-case
+        (clython.parser:parse-module tokens)
+      (clython.parser:parser-error (e)
+        (error 'py-syntax-error
+               :message (format nil "~A" e))))))
 
 (defun py-eval (source)
   "Evaluate a Python source string and return the result."
