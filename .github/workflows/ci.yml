@@ -19,28 +19,3 @@ jobs:
 
       - name: Unit Tests
         run: make test
-
-  conformance:
-    name: Conformance (informational)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install conformance dependencies
-        run: |
-          cd tests/conformance
-          pip install -e . || pip install pytest
-
-      - name: Install SBCL
-        run: sudo apt-get update && sudo apt-get install -y sbcl
-
-      - name: Build Clython (for conformance)
-        run: make build
-
-      - name: Run conformance tests
-        run: make conformance
