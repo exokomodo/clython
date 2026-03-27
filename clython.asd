@@ -10,6 +10,7 @@
                              (:file "parser")
                              (:file "runtime")
                              (:file "builtins")
+                             (:file "exceptions")
                              (:file "scope")
                              (:file "eval")
                              (:file "clython")
