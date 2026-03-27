@@ -77,8 +77,9 @@ if [[ "$parse_only" == "1" ]]; then
 else
     lisp_eval="(handler-case
         (let ((result (clython:py-eval \"$escaped_source\")))
-          (when result
-            (format t \"~A~%\" result)))
+          (when (and result
+                     (not (eq result clython.runtime:+py-none+)))
+            (format t \"~A~%\" (clython.runtime:py-repr result))))
         (clython:py-syntax-error (e)
           (format *error-output* \"SyntaxError: ~A~%\" e)
           (sb-ext:exit :code 2))

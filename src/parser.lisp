@@ -306,9 +306,10 @@
       ;; Complex
       ((and (> (length clean) 0)
             (char= (char clean (1- (length clean))) #\j))
-       (let ((base (subseq clean 0 (1- (length clean)))))
+       (let* ((*read-default-float-format* 'double-float)
+              (base (subseq clean 0 (1- (length clean)))))
          (if (string= base "")
-             (complex 0 1)
+             (complex 0 1.0d0)
              (complex 0 (read-from-string base)))))
       ;; Hex
       ((and (>= (length clean) 2) (string= (subseq clean 0 2) "0x"))
@@ -321,7 +322,8 @@
        (parse-integer (subseq clean 2) :radix 2))
       ;; Float (contains . or e)
       ((or (find #\. clean) (find #\e clean))
-       (read-from-string clean))
+       (let ((*read-default-float-format* 'double-float))
+         (read-from-string clean)))
       ;; Integer
       (t
        (parse-integer clean)))))
@@ -2430,12 +2432,15 @@
             (return-from module-loop)))
         (let ((stmt (parse-statement ps)))
           (when (failp stmt)
-            ;; Try to skip bad token and continue
+            ;; Syntax error — cannot parse statement at current token
             (let ((tok (ps-token ps)))
               (when (or (null tok) (eq (tok-type tok) :endmarker))
                 (return-from module-loop))
-              (ps-advance ps))
-            (go :next-stmt))
+              (error 'parser-error
+                     :message (format nil "invalid syntax: unexpected '~A'"
+                                      (tok-value tok))
+                     :line (tok-line tok)
+                     :column (tok-col tok))))
           (if (listp stmt)
               (setf stmts (append stmts stmt))
               (push stmt stmts)))
