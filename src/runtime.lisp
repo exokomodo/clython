@@ -408,10 +408,18 @@
         (format nil "(~{~A~^, ~})" (mapcar #'py-repr elems)))))
 (defmethod py-str-of ((obj py-tuple)) (py-repr obj))
 
+(defun repr-dict-key (k)
+  "Repr a dict hash-table key (which is a CL value, not a py-object)."
+  (typecase k
+    (string  (format nil "'~A'" k))
+    (integer (format nil "~A" k))
+    (float   (format nil "~A" k))
+    (t       (if (eq k :none) "None" (format nil "~A" k)))))
+
 (defmethod py-repr ((obj py-dict))
   (let ((pairs '()))
     (maphash (lambda (k v)
-               (push (format nil "~A: ~A" (py-repr k) (py-repr v)) pairs))
+               (push (format nil "~A: ~A" (repr-dict-key k) (py-repr v)) pairs))
              (py-dict-value obj))
     (format nil "{~{~A~^, ~}}" (nreverse pairs))))
 (defmethod py-str-of ((obj py-dict)) (py-repr obj))
@@ -770,17 +778,28 @@
         (error "IndexError: string index out of range")
         (make-py-str (string (char s i))))))
 
+(defun dict-hash-key (key)
+  "Unwrap a Python object to a CL value suitable for EQUAL hash-table lookup.
+   py-str → CL string, py-int → CL integer, py-float → CL float,
+   py-bool → CL T/NIL, py-none → :none, otherwise the object itself."
+  (typecase key
+    (py-str   (py-str-value key))
+    (py-int   (py-int-value key))
+    (py-float (py-float-value key))
+    (py-bool  (py-bool-raw key))
+    (t        (if (eq key +py-none+) :none key))))
+
 (defmethod py-getitem ((obj py-dict) key)
-  (multiple-value-bind (val found) (gethash key (py-dict-value obj))
+  (multiple-value-bind (val found) (gethash (dict-hash-key key) (py-dict-value obj))
     (unless found
       (error "KeyError: ~A" (py-repr key)))
     val))
 
 (defmethod py-setitem ((obj py-dict) key value)
-  (setf (gethash key (py-dict-value obj)) value))
+  (setf (gethash (dict-hash-key key) (py-dict-value obj)) value))
 
 (defmethod py-delitem ((obj py-dict) key)
-  (unless (remhash key (py-dict-value obj))
+  (unless (remhash (dict-hash-key key) (py-dict-value obj))
     (error "KeyError: ~A" (py-repr key))))
 
 ;;; __len__ ----------------------------------------------------------------
@@ -844,13 +863,21 @@
            (prog1 (make-py-int (aref v i)) (incf i))
            (error 'stop-iteration))))))
 
+(defun cl-to-py (val)
+  "Wrap a CL value back into a py-object for iteration over dict keys."
+  (typecase val
+    (string  (make-py-str val))
+    (integer (make-py-int val))
+    (float   (make-py-float val))
+    (t       (if (eq val :none) +py-none+ val))))
+
 (defmethod py-iter ((obj py-dict))
   (let ((keys (%hash-table-keys (py-dict-value obj)))
         (i 0))
     (make-py-iterator
      (lambda ()
        (if (< i (length keys))
-           (prog1 (nth i keys) (incf i))
+           (prog1 (cl-to-py (nth i keys)) (incf i))
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-set))
@@ -913,7 +940,7 @@
   (not (null (search (py-str-value item) (py-str-value obj)))))
 
 (defmethod py-contains ((obj py-dict) key)
-  (nth-value 1 (gethash key (py-dict-value obj))))
+  (nth-value 1 (gethash (dict-hash-key key) (py-dict-value obj))))
 
 (defmethod py-contains ((obj py-set) item)
   (nth-value 1 (gethash item (py-set-value obj))))

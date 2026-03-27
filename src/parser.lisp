@@ -2443,12 +2443,10 @@
                      :column (tok-col tok))))
           (if (listp stmt)
               (setf stmts (append stmts stmt))
-              (push stmt stmts)))
+              (setf stmts (append stmts (list stmt)))))
         (go :next-stmt)))
-    ;; Build module node
-    (let ((body (if (and stmts (listp (car stmts)) (not (typep (car stmts) 'clython.ast:py-ast-node)))
-                    stmts ; already in order from append
-                    (nreverse stmts))))
+    ;; Build module node — stmts is always in source order (append-only)
+    (let ((body stmts))
       (make-instance 'clython.ast:module-node
                      :body body
                      :line 1 :col 0))))
