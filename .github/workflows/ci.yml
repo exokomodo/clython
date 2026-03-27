@@ -15,13 +15,17 @@ jobs:
     name: Build & Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
       - name: Install SBCL
-        run: sudo apt-get update && sudo apt-get install -y sbcl
+        run: |
+          make setup/sbcl
 
       - name: Build
-        run: make build
+        run: |
+          make build
 
       - name: Unit Tests
-        run: make test
+        run: |
+          make test/unit
