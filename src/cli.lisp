@@ -32,8 +32,8 @@
            (let ((ast (clython:py-parse (third args))))
              (format t "~A~%" ast))
          (error (e)
-           (format *error-output* "~A~%" e)
-           (uiop:quit 1))))
+           (format *error-output* "SyntaxError: ~A~%" e)
+           (uiop:quit 2))))
       ;; file.py → evaluate file
       (t
        (let ((filename (first args)))

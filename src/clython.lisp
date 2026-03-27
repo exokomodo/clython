@@ -2,7 +2,7 @@
 
 (defpackage :clython
   (:use :cl)
-  (:export #:repl #:py-eval #:py-parse #:py-syntax-error))
+  (:export #:repl #:py-eval #:py-eval-expr #:py-parse #:py-syntax-error))
 
 (in-package :clython)
 
@@ -20,28 +20,44 @@
         (error 'py-syntax-error
                :message (format nil "~A" e))))))
 
-(defun py-eval (source)
-  "Evaluate a Python source string. Returns the last expression value (as a py-object)."
+(defun py-eval (source &optional env)
+  "Evaluate a Python source string. Returns the last expression value (as a py-object).
+   If ENV is supplied, evaluates in that environment (for REPL continuity)."
   (let* ((ast (py-parse source))
-         (env (clython.scope:make-global-env)))
+         (env (or env (clython.scope:make-global-env))))
     (clython.eval:eval-node ast env)))
+
+(defun py-eval-expr (source env)
+  "Try to evaluate SOURCE as a single expression in ENV.
+   Returns (values result t) on success, or (values nil nil) if SOURCE
+   is not a valid standalone expression."
+  (handler-case
+      (let* ((tokens (clython.lexer:tokenize source))
+             (expr (clython.parser:parse-expression tokens)))
+        (values (clython.eval:eval-node expr env) t))
+    (error () (values nil nil))))
 
 (defun repl ()
   "Start an interactive Clython REPL."
   (format t "Clython 0.1.0 — Python in Common Lisp~%")
   (format t "Type (quit) to exit.~%~%")
-  (loop
-    (format t ">>> ")
-    (force-output)
-    (let ((line (read-line *standard-input* nil :eof)))
-      (when (or (eq line :eof)
-                (string= line "(quit)"))
-        (return))
-      (unless (string= (string-trim '(#\Space #\Tab) line) "")
-        (handler-case
-            (let ((result (py-eval line)))
-              ;; Print result if it's not None (like Python interactive mode)
-              (unless (eq result clython.runtime:+py-none+)
-                (format t "~A~%" (clython.runtime:py-repr result))))
-          (error (e)
-            (format t "Error: ~A~%" e)))))))
+  (let ((env (clython.scope:make-global-env)))
+    (loop
+      (format t ">>> ")
+      (force-output)
+      (let ((line (read-line *standard-input* nil :eof)))
+        (when (or (eq line :eof)
+                  (string= line "(quit)"))
+          (return))
+        (unless (string= (string-trim '(#\Space #\Tab) line) "")
+          (handler-case
+              ;; Try as expression first (like CPython's eval mode)
+              (multiple-value-bind (result ok) (py-eval-expr line env)
+                (if ok
+                    ;; Expression — print result unless None
+                    (unless (eq result clython.runtime:+py-none+)
+                      (format t "~A~%" (clython.runtime:py-repr result)))
+                    ;; Not an expression — execute as statements
+                    (py-eval line env)))
+            (error (e)
+              (format t "Error: ~A~%" e))))))))
