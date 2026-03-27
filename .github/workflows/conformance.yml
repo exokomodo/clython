@@ -17,9 +17,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [cpython, clython]
+        target:
+          - cpython
+          - clython
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout code
+        uses: actions/checkout@v6
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -28,16 +31,18 @@ jobs:
 
       - name: Install conformance dependencies
         run: |
-          cd tests/conformance
-          pip install -e . || pip install pytest
+          make setup/python
 
       - name: Install SBCL
         if: matrix.target == 'clython'
-        run: sudo apt-get update && sudo apt-get install -y sbcl
+        run: |
+          make setup/sbcl
 
       - name: Build Clython
         if: matrix.target == 'clython'
-        run: make build
+        run: |
+          make build
 
       - name: Run conformance tests
-        run: make conformance-${{ matrix.target }}
+        run: |
+          make conformance-${{ matrix.target }}
