@@ -9,6 +9,7 @@ UNAME_S := $(shell uname -s)
 
 PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
+PYTEST ?= $(PYTHON) -m pytest
 VENV ?= $(PYTHON) -m venv
 VENV_DIR := venv
 SBCL := sbcl --noinform --non-interactive --eval '(require :asdf)' --eval '(push (truename ".") asdf:*central-registry*)'
@@ -67,13 +68,19 @@ test/unit: ## Run CL unit tests
 
 .PHONY: conformance-cpython
 conformance-cpython: ## Run conformance test suite against CPython (baseline)
+	if [[ -f $(VENV_DIR)/bin/activate ]]; then
+		. $(VENV_DIR)/bin/activate
+	fi
 	cd tests/conformance
-	python3 -m pytest tests/ -v --tb=short --ignore=tests/conformance/test_clython_smoke.py
+	$(PYTEST) tests/ -v --tb=short --ignore=tests/conformance/test_clython_smoke.py
 
 .PHONY: conformance-clython
 conformance-clython: ## Run conformance test suite against Clython
+	if [[ -f $(VENV_DIR)/bin/activate ]]; then
+		. $(VENV_DIR)/bin/activate
+	fi
 	cd tests/conformance
-	CLYTHON_BIN=$(CURDIR)/bin/clython python3 -m pytest tests/conformance/test_clython_smoke.py -v --tb=short
+	CLYTHON_BIN=$(CURDIR)/bin/clython $(PYTEST) tests/conformance/test_clython_smoke.py -v --tb=short
 
 ##@ Utilities
 
