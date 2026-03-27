@@ -321,7 +321,8 @@
        (parse-integer (subseq clean 2) :radix 2))
       ;; Float (contains . or e)
       ((or (find #\. clean) (find #\e clean))
-       (read-from-string clean))
+       (let ((*read-default-float-format* 'double-float))
+         (read-from-string clean)))
       ;; Integer
       (t
        (parse-integer clean)))))
@@ -2430,12 +2431,14 @@
             (return-from module-loop)))
         (let ((stmt (parse-statement ps)))
           (when (failp stmt)
-            ;; Try to skip bad token and continue
+            ;; Signal a syntax error — don't silently skip bad tokens
             (let ((tok (ps-token ps)))
               (when (or (null tok) (eq (tok-type tok) :endmarker))
                 (return-from module-loop))
-              (ps-advance ps))
-            (go :next-stmt))
+              (error 'parser-error
+                     :message (format nil "invalid syntax (unexpected ~A ~S)"
+                                      (tok-type tok) (tok-value tok))
+                     :line (tok-line tok) :column (tok-col tok))))
           (if (listp stmt)
               (setf stmts (append stmts stmt))
               (push stmt stmts)))
