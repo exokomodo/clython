@@ -11,7 +11,6 @@
                 #:stop-iteration)
   (:export
    #:*builtins*
-   #:lookup-builtin
    ;; Individual built-in py-function objects
    #:+builtin-print+
    #:+builtin-repr+
@@ -507,6 +506,4 @@
 
 (%register-builtins)
 
-(defun lookup-builtin (name)
-  "Return the py-function for a Python builtin by name, or NIL if not found."
-  (gethash name *builtins*))
+
