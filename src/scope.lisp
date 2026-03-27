@@ -114,9 +114,9 @@
       (multiple-value-bind (val found) (gethash name (env-bindings e))
         (when found (return-from env-get val)))
       (setf e (env-parent e))))
-  ;; Builtin fallback
-  (let ((builtin (clython.builtins:lookup-builtin name)))
-    (when builtin (return-from env-get builtin)))
+  ;; Builtin fallback — check the builtins registry directly
+  (multiple-value-bind (builtin found) (gethash name clython.builtins:*builtins*)
+    (when found (return-from env-get builtin)))
   (error "NameError: name '~A' is not defined" name))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
