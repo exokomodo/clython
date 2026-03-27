@@ -36,14 +36,24 @@
           :initform nil))
   (:report (lambda (c stream)
              (let ((v (py-exception-value c)))
-               (if (typep v 'clython.runtime:py-object)
-                   (format stream "~A" (clython.runtime:py-str-of v))
-                   (format stream "~A" v)))))
+               (cond
+                 ((typep v 'clython.runtime:py-exception-object)
+                  (let ((name (clython.runtime:py-exception-class-name v))
+                        (msg  (clython.runtime:py-exception-message v)))
+                    (if (string= msg "")
+                        (format stream "~A" name)
+                        (format stream "~A: ~A" name msg))))
+                 ((typep v 'clython.runtime:py-object)
+                  (format stream "~A" (clython.runtime:py-str-of v)))
+                 (t (format stream "~A" v))))))
   (:documentation "Signalled by `raise` — wraps a Python exception object."))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Generic function
 ;;;; ═══════════════════════════════════════════════════════════════════════════
+
+(defvar *current-exception* nil
+  "The currently active exception (py-exception condition), for bare `raise`.")
 
 (defgeneric eval-node (node env)
   (:documentation "Evaluate an AST node in the given environment."))
@@ -719,11 +729,40 @@
 (defmethod eval-node ((node clython.ast:raise-node) env)
   (if (clython.ast:raise-node-exc node)
       (let ((exc (eval-node (clython.ast:raise-node-exc node) env)))
+        ;; If exc is a py-function (exception class), call it with no args
+        (when (and (typep exc 'clython.runtime:py-function)
+                   (not (typep exc 'clython.runtime:py-exception-object)))
+          (setf exc (clython.runtime:py-call exc)))
         (error 'py-exception :value exc))
-      ;; bare raise — re-raise (simplified: just raise a generic error)
-      (error 'py-exception :value (clython.runtime:make-py-str "RuntimeError"))))
+      ;; bare raise — re-raise current exception if available
+      (let ((current *current-exception*))
+        (if current
+            (error current)
+            (error 'py-exception
+                   :value (clython.runtime:make-py-exception-object "RuntimeError"))))))
 
 ;;; ─── Try / Except ──────────────────────────────────────────────────────────
+
+(defun %exception-matches-handler-p (exc-value handler-type-node env)
+  "Check if an exception value matches the type in a handler's except clause.
+   HANDLER-TYPE-NODE is the AST node for the exception type (or NIL for bare except)."
+  (when (null handler-type-node)
+    (return-from %exception-matches-handler-p t))
+  (let ((handler-type (eval-node handler-type-node env)))
+    ;; handler-type should be a py-function (exception constructor) with a name
+    (when (typep handler-type 'clython.runtime:py-function)
+      (let ((handler-name (clython.runtime:py-function-name handler-type)))
+        (cond
+          ;; exc-value is a py-exception-object — check hierarchy
+          ((typep exc-value 'clython.runtime:py-exception-object)
+           (clython.runtime:exception-is-subclass-p
+            (clython.runtime:py-exception-class-name exc-value)
+            handler-name))
+          ;; exc-value is a string (legacy) — check if handler name appears
+          ((typep exc-value 'clython.runtime:py-str)
+           (search handler-name (clython.runtime:py-str-value exc-value)))
+          ;; fallback
+          (t nil))))))
 
 (defmethod eval-node ((node clython.ast:try-node) env)
   (let ((caught nil))
@@ -733,18 +772,23 @@
             (eval-node stmt env)))
       (py-exception (e)
         (setf caught t)
-        ;; Try each handler
-        (let ((handled nil))
+        (let ((*current-exception* e)
+              (handled nil)
+              (exc-val (py-exception-value e)))
           (dolist (handler (clython.ast:try-node-handlers node))
             (unless handled
-              ;; If handler has no type, it catches everything
-              ;; If it has a type, we'd need to check — simplified: always match
-              (when (clython.ast:exception-handler-name handler)
-                (clython.scope:env-set (clython.ast:exception-handler-name handler)
-                                       (py-exception-value e) env))
-              (dolist (stmt (%sort-body (clython.ast:exception-handler-body handler)))
-                (eval-node stmt env))
-              (setf handled t)))
+              ;; Check if the handler type matches the raised exception
+              (when (%exception-matches-handler-p
+                     exc-val
+                     (clython.ast:exception-handler-type handler)
+                     env)
+                ;; Bind the exception to the handler's variable name (if any)
+                (when (clython.ast:exception-handler-name handler)
+                  (clython.scope:env-set (clython.ast:exception-handler-name handler)
+                                         exc-val env))
+                (dolist (stmt (%sort-body (clython.ast:exception-handler-body handler)))
+                  (eval-node stmt env))
+                (setf handled t))))
           (unless handled
             (error e)))))
     ;; else clause (runs if no exception was raised)
@@ -806,11 +850,14 @@
 
 (defmethod eval-node ((node clython.ast:assert-node) env)
   (unless (clython.runtime:py-bool-val (eval-node (clython.ast:assert-node-test node) env))
-    (let ((msg (if (clython.ast:assert-node-msg node)
-                   (clython.runtime:py-str-of
-                    (eval-node (clython.ast:assert-node-msg node) env))
-                   "AssertionError")))
-      (error 'py-exception :value (clython.runtime:make-py-str msg))))
+    (let* ((msg-str (if (clython.ast:assert-node-msg node)
+                        (clython.runtime:py-str-of
+                         (eval-node (clython.ast:assert-node-msg node) env))
+                        ""))
+           (args (unless (string= msg-str "")
+                   (list (clython.runtime:make-py-str msg-str)))))
+      (error 'py-exception
+             :value (clython.runtime:make-py-exception-object "AssertionError" args))))
   clython.runtime:+py-none+)
 
 ;;; ─── F-strings ─────────────────────────────────────────────────────────────

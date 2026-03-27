@@ -506,4 +506,57 @@
 
 (%register-builtins)
 
+;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; Exception classes — registered as callable py-type objects in *builtins*
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %make-exception-type (name)
+  "Create a callable py-function that acts as a Python exception class constructor.
+   When called with args, it creates a py-exception-object instance."
+  (make-py-function :name name
+                    :cl-fn (lambda (&rest args)
+                              (make-py-exception-object name args))))
+
+(defun %register-exception-builtins ()
+  "Register all Python built-in exception names in *builtins*."
+  (dolist (name '("BaseException"
+                  "Exception"
+                  "ArithmeticError"
+                  "ZeroDivisionError"
+                  "OverflowError"
+                  "FloatingPointError"
+                  "AssertionError"
+                  "AttributeError"
+                  "EOFError"
+                  "ImportError"
+                  "ModuleNotFoundError"
+                  "LookupError"
+                  "IndexError"
+                  "KeyError"
+                  "NameError"
+                  "UnboundLocalError"
+                  "OSError"
+                  "FileNotFoundError"
+                  "PermissionError"
+                  "FileExistsError"
+                  "IsADirectoryError"
+                  "NotADirectoryError"
+                  "RuntimeError"
+                  "RecursionError"
+                  "NotImplementedError"
+                  "StopIteration"
+                  "StopAsyncIteration"
+                  "SyntaxError"
+                  "IndentationError"
+                  "TabError"
+                  "TypeError"
+                  "ValueError"
+                  "UnicodeError"
+                  "KeyboardInterrupt"
+                  "SystemExit"
+                  "GeneratorExit"))
+    (setf (gethash name *builtins*) (%make-exception-type name))))
+
+(%register-exception-builtins)
+
 
