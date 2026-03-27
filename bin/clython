@@ -54,7 +54,9 @@ if [[ -z "$mode" ]]; then
     exec "$SBCL" --noinform --non-interactive \
         --eval '(require :asdf)' \
         --eval "(push (truename \"$SCRIPT_DIR\") asdf:*central-registry*)" \
-        --eval '(asdf:load-system :clython)' \
+        --eval '(let ((*standard-output* (make-broadcast-stream))
+                      (*error-output* (make-broadcast-stream)))
+                  (asdf:load-system :clython))' \
         --eval '(clython:repl)'
 fi
 
@@ -91,6 +93,8 @@ fi
 exec "$SBCL" --noinform --non-interactive \
     --eval '(require :asdf)' \
     --eval "(push (truename \"$SCRIPT_DIR\") asdf:*central-registry*)" \
-    --eval '(asdf:load-system :clython)' \
+    --eval '(let ((*standard-output* (make-broadcast-stream))
+                  (*error-output* (make-broadcast-stream)))
+              (asdf:load-system :clython))' \
     --eval "$lisp_eval" \
     --eval '(sb-ext:exit :code 0)'
