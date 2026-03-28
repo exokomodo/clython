@@ -1224,6 +1224,18 @@
   (let ((fn (%lookup-dunder a "__neg__")))
     (if fn (py-call fn a)
         (py-raise "TypeError" "bad operand type for unary -"))))
+(defmethod py-pos ((a py-object))
+  (let ((fn (%lookup-dunder a "__pos__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for unary +"))))
+(defmethod py-abs ((a py-object))
+  (let ((fn (%lookup-dunder a "__abs__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for abs()"))))
+(defmethod py-invert ((a py-object))
+  (let ((fn (%lookup-dunder a "__invert__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for unary ~"))))
 (defmethod py-abs ((a py-complex)) (make-py-float (abs (py-complex-value a))))
 
 ;;; attribute access -------------------------------------------------------
@@ -1865,6 +1877,12 @@
   (unless (remhash (dict-hash-key key) (py-dict-value obj))
     (py-raise "KeyError" "~A" (py-repr key))))
 
+(defmethod py-delitem ((obj py-object) key)
+  (let ((fn (%lookup-dunder obj "__delitem__")))
+    (if fn (py-call fn obj key)
+        (py-raise "TypeError" "'~A' object doesn't support item deletion"
+                  (class-name (class-of obj))))))
+
 ;;; __len__ ----------------------------------------------------------------
 
 (defgeneric py-len (obj) (:documentation "Python len(obj) — returns a CL integer."))
@@ -2116,12 +2134,46 @@
           (py-bool-val result))
         (eq a b))))
 
+(defmethod py-ne ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__ne__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        ;; Default: negate __eq__
+        (not (py-eq a b)))))
+
 (defmethod py-lt ((a py-object) (b py-object))
   (let ((fn (%lookup-dunder a "__lt__")))
     (if fn
         (let ((result (py-call fn a b)))
           (py-bool-val result))
         (py-raise "TypeError" "'<' not supported"))))
+
+(defmethod py-le ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__le__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        (py-raise "TypeError" "'<=' not supported"))))
+
+(defmethod py-gt ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__gt__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        (py-raise "TypeError" "'>' not supported"))))
+
+(defmethod py-ge ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__ge__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        (py-raise "TypeError" "'>=' not supported"))))
+
+(defmethod py-hash ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__hash__")))
+    (if fn
+        (let ((result (py-call fn obj)))
+          (if (typep result 'py-int)
+              (py-int-value result)
+              (sxhash obj)))
+        (sxhash obj))))
 
 (defmethod py-bool-val ((obj py-object))
   (let ((fn (%lookup-dunder obj "__bool__")))

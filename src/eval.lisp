@@ -982,6 +982,91 @@
         (eval-node stmt env)))
     clython.runtime:+py-none+))
 
+;;; ─── With statement ────────────────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:with-node) env)
+  (let ((items (clython.ast:with-node-items node))
+        (body  (clython.ast:with-node-body node)))
+    (%eval-with-items items body env)))
+
+(defun %eval-with-items (items body env)
+  "Evaluate with items recursively (for multiple context managers in one with)."
+  (if (null items)
+      ;; All context managers entered — execute body
+      (progn
+        (dolist (stmt body)
+          (eval-node stmt env))
+        clython.runtime:+py-none+)
+      (let* ((item (first items))
+             (ctx-expr (clython.ast:with-item-context-expr item))
+             (opt-var  (clython.ast:with-item-optional-vars item))
+             (ctx-mgr  (eval-node ctx-expr env))
+             ;; Call __enter__
+             (enter-method (clython.runtime:py-getattr ctx-mgr "__enter__"))
+             (enter-val    (clython.runtime:py-call enter-method)))
+        ;; Bind the result if 'as' variable present
+        (when opt-var
+          (%assign-target opt-var enter-val env))
+        ;; Execute body, then call __exit__
+        (let ((exc-info nil)
+              (result nil))
+          (handler-case
+              (setf result (%eval-with-items (rest items) body env))
+            ;; Catch Python exceptions
+            (py-exception (e)
+              (setf exc-info e))
+            (clython.runtime:py-runtime-error (e)
+              (setf exc-info e))
+            ;; Catch return signals — need to still call __exit__
+            (py-return-value (ret)
+              (setf exc-info ret)))
+          ;; Call __exit__
+          (let* ((exit-method (clython.runtime:py-getattr ctx-mgr "__exit__"))
+                 (exit-result
+                   (cond
+                     ;; Python exception
+                     ((typep exc-info 'py-exception)
+                      (let ((exc-val (py-exception-value exc-info)))
+                        (clython.runtime:py-call
+                         exit-method
+                         ;; exc_type: the type/class
+                         (if (typep exc-val 'clython.runtime:py-exception-object)
+                             (clython.runtime:make-py-type
+                              :name (clython.runtime:py-exception-class-name exc-val))
+                             clython.runtime:+py-none+)
+                         ;; exc_val: the exception instance
+                         (if (typep exc-val 'clython.runtime:py-exception-object)
+                             exc-val
+                             clython.runtime:+py-none+)
+                         ;; exc_tb: traceback (not implemented)
+                         clython.runtime:+py-none+)))
+                     ;; Runtime error
+                     ((typep exc-info 'clython.runtime:py-runtime-error)
+                      (clython.runtime:py-call exit-method
+                                               clython.runtime:+py-true+
+                                               clython.runtime:+py-none+
+                                               clython.runtime:+py-none+))
+                     ;; Return signal or no exception
+                     (t
+                      (clython.runtime:py-call exit-method
+                                               clython.runtime:+py-none+
+                                               clython.runtime:+py-none+
+                                               clython.runtime:+py-none+)))))
+            ;; Handle exception suppression
+            (cond
+              ;; Return signal — re-signal after __exit__
+              ((typep exc-info 'py-return-value)
+               (signal exc-info))
+              ;; Exception — suppress if __exit__ returned truthy
+              ((and exc-info (clython.runtime:py-bool-val exit-result))
+               ;; Exception suppressed
+               nil)
+              ;; Exception — not suppressed, re-raise
+              (exc-info
+               (error exc-info))
+              ;; No exception
+              (t result))))))))
+
 ;;; ─── Async with ────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:async-with-node) env)

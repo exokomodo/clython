@@ -152,7 +152,6 @@ class TestSection91CompleteProgramsExtended:
         out, _, rc = clython_run("# just a comment\n")
         assert rc == 0 and out == ""
 
-    @pytest.mark.xfail(reason="__name__ not defined in Clython execution context")
     def test_main_guard_pattern(self):
         out, _, rc = clython_run_file(
             "def main():\n"
