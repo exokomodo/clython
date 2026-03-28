@@ -80,7 +80,7 @@ conformance-clython: ## Run conformance test suite against Clython
 		. $(VENV_DIR)/bin/activate
 	fi
 	cd tests/conformance
-	CLYTHON_BIN=$(CURDIR)/bin/clython $(PYTEST) tests/conformance/test_clython_smoke.py -v --tb=short
+	CLYTHON_BIN=$(CURDIR)/bin/clython $(PYTEST) tests/conformance/test_clython_*.py -v --tb=short
 
 ##@ Utilities
 
