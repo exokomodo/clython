@@ -1664,12 +1664,10 @@ class TestSection615ExpressionLists:
         out, _, rc = clython_run("print([1, *[2, 3], 4])")
         assert rc == 0 and out == "[1, 2, 3, 4]"
 
-    @pytest.mark.xfail(reason="Star unpacking in set literals not yet supported")
     def test_starred_in_set_literal(self):
         out, _, rc = clython_run("print(sorted({1, *[2, 3], 4}))")
         assert rc == 0 and out == "[1, 2, 3, 4]"
 
-    @pytest.mark.xfail(reason="Double-star unpacking in dict literals not yet supported")
     def test_starred_in_dict_literal(self):
         out, _, rc = clython_run("print({**{'a': 1}, **{'b': 2}})")
         assert rc == 0 and out == "{'a': 1, 'b': 2}"

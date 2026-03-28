@@ -164,15 +164,32 @@
       +py-false+
       (py-bool-from-cl (py-bool-val (first args)))))
 
+(defvar *type-type* nil
+  "Canonical 'type' type object for type(type) is type.")
+
 (defbuiltin +builtin-type+ "type" (&rest args)
   (cond
     ;; type(obj) — return the type
     ((= (length args) 1)
      (let* ((obj (first args))
             (cls (py-object-class obj)))
-       (if (typep cls 'py-type)
-           cls
-           (make-py-type :name (py-type-of obj)))))
+       (cond
+         ;; User-defined class instances: return their class
+         ((typep cls 'py-type) cls)
+         ;; py-type objects: type(SomeClass) → type
+         ((typep obj 'py-type)
+          (or *type-type* (make-py-type :name "type")))
+         ;; py-function representing a builtin type → type
+         ((and (typep obj 'py-function)
+               (member (py-function-name obj)
+                       '("int" "str" "float" "bool" "list" "tuple" "dict"
+                         "set" "frozenset" "bytes" "type" "object" "complex"
+                         "range" "enumerate" "zip" "map" "filter" "reversed"
+                         "super" "property" "staticmethod" "classmethod")
+                       :test #'string=))
+          (or *type-type* (make-py-type :name "type")))
+         ;; Default
+         (t (make-py-type :name (py-type-of obj))))))
     ;; type(name, bases, dict) — create a new class
     ((= (length args) 3)
      (let* ((name-obj (first args))
@@ -673,6 +690,10 @@
       (setf (gethash (car pair) *builtins*) (cdr pair)))))
 
 (%register-builtins)
+
+;; Cache object type for MRO computation
+(setf clython.runtime:*object-type*
+      (gethash "object" *builtins*))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Exception classes — registered as callable py-type objects in *builtins*

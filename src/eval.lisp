@@ -153,6 +153,26 @@
                          (write-char (code-char (parse-integer hex :radix 16)) out)
                          (incf i 4))
                        (progn (write-char c out) (incf i))))
+                  (#\u
+                   ;; \uNNNN unicode escape (4 hex digits)
+                   (if (<= (+ i 6) len)
+                       (let ((hex (subseq s (+ i 2) (+ i 6))))
+                         (handler-case
+                             (progn
+                               (write-char (code-char (parse-integer hex :radix 16)) out)
+                               (incf i 6))
+                           (error () (write-char c out) (incf i))))
+                       (progn (write-char c out) (incf i))))
+                  (#\U
+                   ;; \UNNNNNNNN unicode escape (8 hex digits)
+                   (if (<= (+ i 10) len)
+                       (let ((hex (subseq s (+ i 2) (+ i 10))))
+                         (handler-case
+                             (progn
+                               (write-char (code-char (parse-integer hex :radix 16)) out)
+                               (incf i 10))
+                           (error () (write-char c out) (incf i))))
+                       (progn (write-char c out) (incf i))))
                   (t (write-char c out) (write-char next out) (incf i 2))))
               (progn (write-char c out) (incf i))))))))
 
@@ -1792,7 +1812,7 @@
                  ;; Match after star
                  (loop for i from 1 to after-count
                        for pat = (nth (+ star-idx i) sub-patterns)
-                       for elem = (nth (- (length elems) after-count (- i)) elems)
+                       for elem = (nth (+ (- (length elems) after-count) (1- i)) elems)
                        unless (%match-pattern elem pat env)
                          do (return-from %match-pattern nil))
                  t)

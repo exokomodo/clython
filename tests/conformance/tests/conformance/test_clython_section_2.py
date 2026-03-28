@@ -1140,7 +1140,6 @@ class TestSection25StringLiteralsExtended:
         assert rc == 0
         assert out == "hello\\world"
 
-    @pytest.mark.xfail(reason="Clython does not process \\u Unicode escapes")
     def test_unicode_escape_sequence(self):
         out, _, rc = clython_run(r"print('\u0041')")
         assert rc == 0
@@ -1255,7 +1254,6 @@ class TestSection25StringConcatenationRules:
 class TestSection26IntegerLiteralsExtended:
     """2.6.1: Extended integer literal tests from formal grammar."""
 
-    @pytest.mark.xfail(reason="Clython does not reject leading zeros in non-zero decimal")
     def test_leading_zeros_forbidden(self):
         """Leading zeros in non-zero decimal number should error."""
         _, _, rc = clython_run("x = 01")

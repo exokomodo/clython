@@ -516,7 +516,6 @@ match {"a": 1, "b": 2, "c": 3}:
         assert rc == 0
         assert out == "1 2"
 
-    @pytest.mark.xfail(reason="mapping patterns with ** rest may not be implemented")
     def test_dict_pattern_rest(self):
         out, _, rc = clython_run("""
 match {"x": 1, "y": 2, "z": 3}:
@@ -609,7 +608,6 @@ match [1, 2, 3, 4]:
         assert rc == 0
         assert out == "1 [2, 3, 4]"
 
-    @pytest.mark.xfail(reason="star patterns in match may not be implemented")
     def test_star_pattern_middle(self):
         out, _, rc = clython_run("""
 match [1, 2, 3, 4, 5]:

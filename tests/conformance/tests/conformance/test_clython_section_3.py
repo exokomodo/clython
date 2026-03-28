@@ -490,7 +490,6 @@ class TestSection33ContextManagerProtocol:
 class TestSection33DescriptorProtocol:
     """Descriptor protocol (__get__, __set__)."""
 
-    @pytest.mark.xfail(reason="descriptor protocol may not be implemented")
     def test_data_descriptor(self):
         out, _, rc = clython_run(
             "class Desc:\n"
@@ -578,7 +577,6 @@ class TestSection3MROAndMultipleInheritance:
         )
         assert rc == 0 and out == "B"
 
-    @pytest.mark.xfail(reason="MRO __mro__ attribute may not be exposed")
     def test_mro_order(self):
         out, _, rc = clython_run(
             "class A: pass\n"

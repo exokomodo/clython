@@ -185,7 +185,9 @@
    #:py-runtime-error-class-name
    #:py-runtime-error-message
    #:py-raise
-   #:%lookup-dunder))
+   #:%lookup-dunder
+   #:*object-type*
+   #:%compute-c3-mro))
 
 (in-package :clython.runtime)
 
@@ -319,8 +321,8 @@
   ((%value :initarg :value :accessor py-dict-value))
   (:documentation "Python dict."))
 
-(defun make-py-dict ()
-  (make-instance 'py-dict :value (make-hash-table :test #'equal)))
+(defun make-py-dict (&optional ht)
+  (make-instance 'py-dict :value (or ht (make-hash-table :test #'equal))))
 
 ;;; set --------------------------------------------------------------------
 (defclass py-set (py-object)
@@ -590,6 +592,46 @@
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Protocol generic functions
 ;;;; ─────────────────────────────────────────────────────────────────────────
+
+;;; C3 MRO linearization ---------------------------------------------------
+
+(defvar *object-type* nil
+  "Cached reference to the builtin 'object' type, set after builtins are registered.")
+
+(defun %compute-c3-mro (cls)
+  "Compute C3 linearization for CLS. Returns a list of py-type objects."
+  (if (null (py-type-bases cls))
+      ;; Base case: class with no explicit bases
+      (if *object-type*
+          (if (eq cls *object-type*)
+              (list cls)
+              (list cls *object-type*))
+          (list cls))
+      ;; Recursive C3 merge
+      (let* ((parent-mros (mapcar #'%compute-c3-mro (py-type-bases cls)))
+             (to-merge (append parent-mros (list (copy-list (py-type-bases cls))))))
+        (cons cls (%c3-merge to-merge)))))
+
+(defun %c3-merge (seqs)
+  "C3 linearization merge step."
+  (let ((result '()))
+    (loop
+      ;; Remove empty lists
+      (setf seqs (remove-if #'null seqs))
+      (when (null seqs) (return (nreverse result)))
+      ;; Find a candidate: head of some list that doesn't appear in tail of any list
+      (let ((candidate nil))
+        (dolist (seq seqs)
+          (let ((head (first seq)))
+            (unless (some (lambda (s) (member head (rest s) :test #'eq)) seqs)
+              (setf candidate head)
+              (return))))
+        (unless candidate
+          ;; C3 linearization impossible — fall back to DFS
+          (return (nreverse (append result (mapcan #'copy-list seqs)))))
+        ;; Add candidate to result and remove it from all lists
+        (push candidate result)
+        (setf seqs (mapcar (lambda (s) (remove candidate s :test #'eq)) seqs))))))
 
 ;;; Class hierarchy lookup --------------------------------------------------
 
@@ -1783,6 +1825,9 @@
   ;; Built-in attributes for type objects
   (cond
     ((string= name "__name__") (make-py-str (py-type-name obj)))
+    ((string= name "__mro__")
+     ;; Compute C3-linearized MRO
+     (make-py-tuple (%compute-c3-mro obj)))
     (t
      ;; Check the type's own dict and parent classes
      (multiple-value-bind (val found) (%lookup-in-class-hierarchy obj name)
@@ -1804,13 +1849,37 @@
       (setf (py-type-dict obj) tdict))
     (setf (gethash name tdict) value)))
 
+(defun %is-data-descriptor-p (val)
+  "Check if VAL is a data descriptor (has __set__ or __delete__)."
+  (and (typep val 'py-object)
+       (let ((cls (py-object-class val)))
+         (when (typep cls 'py-type)
+           (or (gethash "__set__" (py-type-dict cls))
+               (gethash "__delete__" (py-type-dict cls)))))))
+
+(defun %invoke-descriptor-get (desc obj cls)
+  "Invoke __get__ on a descriptor if it has one, else return desc."
+  (when (typep desc 'py-object)
+    (let ((get-fn (%lookup-dunder desc "__get__")))
+      (when get-fn
+        (return-from %invoke-descriptor-get
+          (py-call get-fn desc obj (or cls +py-none+))))))
+  desc)
+
 (defmethod py-getattr ((obj py-object) (name string))
-  ;; 1. Check instance dict
+  ;; 1. Check class dict for data descriptors (priority over instance dict)
+  (let ((cls (py-object-class obj)))
+    (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
+      (when found
+        ;; Data descriptor takes priority
+        (when (%is-data-descriptor-p val)
+          (return-from py-getattr (%invoke-descriptor-get val obj cls))))))
+  ;; 2. Check instance dict
   (let ((d (py-object-dict obj)))
     (when (hash-table-p d)
       (multiple-value-bind (val found) (gethash name d)
         (when found (return-from py-getattr val)))))
-  ;; 2. Check class dict and parent classes (MRO)
+  ;; 3. Check class dict for non-data descriptors, methods, etc.
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
       (when found
@@ -1828,6 +1897,9 @@
              (if fget
                  (return-from py-getattr (py-call fget obj))
                  (py-raise "AttributeError" "unreadable attribute"))))
+          ;; Non-data descriptor with __get__
+          ((and (typep val 'py-object) (%lookup-dunder val "__get__"))
+           (return-from py-getattr (%invoke-descriptor-get val obj cls)))
           ;; Regular function — return a bound method
           ((typep val 'py-function)
            (return-from py-getattr
@@ -1840,14 +1912,23 @@
             name))
 
 (defmethod py-setattr ((obj py-object) (name string) value)
-  ;; Check for @property setter in class hierarchy
+  ;; Check for @property setter or data descriptor __set__ in class hierarchy
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
-      (when (and found (typep val 'py-property-wrapper))
-        (let ((fset (py-property-fset val)))
-          (if fset
-              (progn (py-call fset obj value) (return-from py-setattr +py-none+))
-              (py-raise "AttributeError" "can't set attribute"))))))
+      (when found
+        (cond
+          ((typep val 'py-property-wrapper)
+           (let ((fset (py-property-fset val)))
+             (if fset
+                 (progn (py-call fset obj value) (return-from py-setattr +py-none+))
+                 (py-raise "AttributeError" "can't set attribute"))))
+          ;; Data descriptor with __set__
+          ((and (typep val 'py-object)
+                (let ((set-fn (%lookup-dunder val "__set__")))
+                  (when set-fn
+                    (py-call set-fn val obj value)
+                    t)))
+           (return-from py-setattr +py-none+))))))
   (unless (hash-table-p (py-object-dict obj))
     (setf (py-object-dict obj) (make-hash-table :test #'equal)))
   (setf (gethash name (py-object-dict obj)) value))

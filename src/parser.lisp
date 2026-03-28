@@ -714,6 +714,48 @@
       (return-from nil
         (make-node 'clython.ast:dict-node :keys nil :values nil
                    :line line :col col)))
+    ;; Check for {**expr, ...} dict starting with double-star unpacking
+    (let ((star-tok (ps-token ps)))
+      (when (and star-tok (eq (tok-type star-tok) :op)
+                 (string= (tok-value star-tok) "**"))
+        (ps-advance ps)
+        (let ((expr (parse-expression-internal ps)))
+          (when (failp expr) (ps-restore ps saved) (return-from nil +fail+))
+          ;; Parse remaining key:value and **unpack pairs
+          (let ((keys (list nil))
+                (vals (list expr)))
+            (loop
+              (let ((comma (ps-token ps)))
+                (unless (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+                  (return))
+                (ps-advance ps))
+              (when (expect-close-brace ps) (return))
+              (let ((nxt (ps-token ps)))
+                (if (and nxt (eq (tok-type nxt) :op) (string= (tok-value nxt) "**"))
+                    (progn
+                      (ps-advance ps)
+                      (let ((e (parse-expression-internal ps)))
+                        (when (failp e) (return))
+                        (push nil keys)
+                        (push e vals)))
+                    (let ((k (parse-expression-internal ps)))
+                      (when (failp k) (return))
+                      (let ((colon (ps-token ps)))
+                        (unless (and colon (eq (tok-type colon) :op) (string= (tok-value colon) ":"))
+                          (return))
+                        (ps-advance ps))
+                      (let ((v (parse-expression-internal ps)))
+                        (when (failp v) (return))
+                        (push k keys)
+                        (push v vals))))))
+            (if (expect-close-brace ps)
+                (progn
+                  (ps-advance ps)
+                  (return-from nil
+                    (make-node 'clython.ast:dict-node
+                               :keys (nreverse keys) :values (nreverse vals)
+                               :line line :col col)))
+                (progn (ps-restore ps saved) (return-from nil +fail+)))))))
     ;; First expression
     (let ((first-expr (parse-expression-internal ps)))
       (when (failp first-expr)
@@ -808,7 +850,7 @@
           (return))
         (ps-advance ps))
       (when (expect-close-brace ps) (return))
-      (let ((elt (parse-expression-internal ps)))
+      (let ((elt (parse-star-expr-or-expr ps)))
         (when (failp elt) (return))
         (push elt elts)))
     (if (expect-close-brace ps)
