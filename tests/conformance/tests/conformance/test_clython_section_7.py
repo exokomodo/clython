@@ -461,7 +461,6 @@ class TestSection72AssignmentStatementsExtended:
         out, _, rc = clython_run("a = b = c = 42\nprint(a, b, c)")
         assert rc == 0 and out == "42 42 42"
 
-    @pytest.mark.xfail(reason="slice assignment may not be implemented")
     def test_list_slice_assignment(self):
         out, _, rc = clython_run("x = [1, 2, 3, 4, 5]\nx[1:3] = [20, 30]\nprint(x)")
         assert rc == 0 and out == "[1, 20, 30, 4, 5]"
@@ -596,7 +595,6 @@ class TestSection75DelStatementExtended:
         )
         assert rc == 0 and out == "all deleted"
 
-    @pytest.mark.xfail(reason="del with slice may not be implemented")
     def test_del_list_slice(self):
         out, _, rc = clython_run("x = [1, 2, 3, 4, 5]\ndel x[1:3]\nprint(x)")
         assert rc == 0 and out == "[1, 4, 5]"

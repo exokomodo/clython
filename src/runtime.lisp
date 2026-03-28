@@ -697,13 +697,31 @@
 (defmethod py-str-of ((obj py-float))
   (py-repr obj))
 
+(defun %format-py-float (val &key (for-complex nil))
+  "Format a double-float like Python. FOR-COMPLEX omits .0 when integer-valued."
+  (cond
+    ((and for-complex (= val (ftruncate val)))
+     ;; Complex parts: integer-valued → no decimal (Python prints 1j not 1.0j)
+     (format nil "~D" (round val)))
+    ((= val (ftruncate val))
+     ;; Regular float: always show .0
+     (format nil "~D.0" (round val)))
+    (t
+     ;; Fractional: trim trailing zeros
+     (let ((s (string-right-trim "0" (format nil "~F" val))))
+       (when (char= (char s (1- (length s))) #\.) (setf s (concatenate 'string s "0")))
+       s))))
+
 (defmethod py-repr ((obj py-complex))
   (let* ((z (py-complex-value obj))
          (r (realpart z))
          (i (imagpart z)))
     (if (zerop r)
-        (format nil "~Gj" i)
-        (format nil "(~G~@Gj)" r i))))
+        (format nil "~Aj" (%format-py-float i :for-complex t))
+        (format nil "(~A~Aj)" (%format-py-float r :for-complex t)
+                (if (>= i 0)
+                    (format nil "+~A" (%format-py-float i :for-complex t))
+                    (%format-py-float i :for-complex t))))))
 (defmethod py-str-of ((obj py-complex)) (py-repr obj))
 
 (defmethod py-repr ((obj py-str))
@@ -1127,6 +1145,50 @@
 (defmethod py-mod ((a py-int) (b py-float))
   (when (zerop (py-float-value b)) (py-raise "ZeroDivisionError" "float modulo"))
   (make-py-float (mod (float (py-int-value a) 1.0d0) (py-float-value b))))
+;;; Complex arithmetic ─────────────────────────────────────────────────────
+
+(defun %to-complex (obj)
+  "Coerce a numeric py-object to a CL complex double-float."
+  (etypecase obj
+    (py-complex (py-complex-value obj))
+    (py-float   (complex (py-float-value obj) 0.0d0))
+    (py-int     (complex (float (py-int-value obj) 1.0d0) 0.0d0))
+    (py-bool    (complex (float (if (py-bool-raw obj) 1 0) 1.0d0) 0.0d0))))
+
+(defmacro %complex-binop (method cl-op)
+  `(progn
+     ;; complex × complex
+     (defmethod ,method ((a py-complex) (b py-complex))
+       (make-py-complex (,cl-op (py-complex-value a) (py-complex-value b))))
+     ;; complex × int
+     (defmethod ,method ((a py-complex) (b py-int))
+       (make-py-complex (,cl-op (py-complex-value a) (%to-complex b))))
+     ;; int × complex
+     (defmethod ,method ((a py-int) (b py-complex))
+       (make-py-complex (,cl-op (%to-complex a) (py-complex-value b))))
+     ;; complex × float
+     (defmethod ,method ((a py-complex) (b py-float))
+       (make-py-complex (,cl-op (py-complex-value a) (%to-complex b))))
+     ;; float × complex
+     (defmethod ,method ((a py-float) (b py-complex))
+       (make-py-complex (,cl-op (%to-complex a) (py-complex-value b))))))
+
+(%complex-binop py-add +)
+(%complex-binop py-sub -)
+(%complex-binop py-mul *)
+(%complex-binop py-truediv /)
+
+(defmethod py-pow ((a py-complex) (b py-complex))
+  (make-py-complex (expt (py-complex-value a) (py-complex-value b))))
+(defmethod py-pow ((a py-complex) (b py-int))
+  (make-py-complex (expt (py-complex-value a) (%to-complex b))))
+(defmethod py-pow ((a py-int) (b py-complex))
+  (make-py-complex (expt (%to-complex a) (py-complex-value b))))
+(defmethod py-pow ((a py-complex) (b py-float))
+  (make-py-complex (expt (py-complex-value a) (%to-complex b))))
+(defmethod py-pow ((a py-float) (b py-complex))
+  (make-py-complex (expt (%to-complex a) (py-complex-value b))))
+
 ;;; String % formatting (printf-style)
 (defmethod py-mod ((a py-str) (b py-tuple))
   "Python string % formatting with tuple of args."
@@ -1606,6 +1668,13 @@
         ((string= name "copy")
          (wrap (lambda ()
                  (make-py-list (coerce vec 'list)))))
+        ((string= name "__len__")
+         (wrap (lambda () (make-py-int (length vec)))))
+        ((string= name "__contains__")
+         (wrap (lambda (item)
+                 (py-bool-from-cl (find-if (lambda (x) (py-eq x item)) vec)))))
+        ((string= name "__class__")
+         (make-py-type :name "list"))
         (t (call-next-method))))))
 
 ;;; ─── Dict methods ──────────────────────────────────────────────────────────
@@ -1881,6 +1950,45 @@
   (let* ((vec (py-list-value obj))
          (len (length vec)))
     (make-py-list (slice-collect vec len key (lambda (i) (aref vec i))))))
+
+(defmethod py-setitem ((obj py-list) (key py-slice) value)
+  "Slice assignment: x[start:stop] = iterable.  Only step=1 supported for now."
+  (let* ((vec (py-list-value obj))
+         (len (length vec)))
+    (multiple-value-bind (start stop step) (compute-slice-indices key len)
+      (declare (ignore step))
+      ;; Collect new values from the iterable
+      (let ((new-items
+              (cond
+                ((typep value 'py-list)
+                 (coerce (py-list-value value) 'list))
+                ((typep value 'py-tuple)
+                 (coerce (py-tuple-value value) 'list))
+                (t (list value)))))
+        ;; Simple case: replace [start..stop) with new-items
+        (let* ((before (loop for i from 0 below start collect (aref vec i)))
+               (after  (loop for i from stop below len collect (aref vec i)))
+               (all    (append before new-items after))
+               (new-vec (make-array (length all)
+                                    :fill-pointer (length all)
+                                    :adjustable t
+                                    :initial-contents all)))
+          (setf (slot-value obj '%value) new-vec))))))
+
+(defmethod py-delitem ((obj py-list) (key py-slice))
+  "Delete a slice from a list: del x[start:stop]."
+  (let* ((vec (py-list-value obj))
+         (len (length vec)))
+    (multiple-value-bind (start stop step) (compute-slice-indices key len)
+      (declare (ignore step))
+      (let* ((before (loop for i from 0 below start collect (aref vec i)))
+             (after  (loop for i from stop below len collect (aref vec i)))
+             (all    (append before after))
+             (new-vec (make-array (length all)
+                                  :fill-pointer (length all)
+                                  :adjustable t
+                                  :initial-contents all)))
+        (setf (slot-value obj '%value) new-vec)))))
 
 (defmethod py-getitem ((obj py-tuple) (key py-int))
   (let* ((vec (py-tuple-value obj))

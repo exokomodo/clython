@@ -309,8 +309,8 @@
        (let* ((*read-default-float-format* 'double-float)
               (base (subseq clean 0 (1- (length clean)))))
          (if (string= base "")
-             (complex 0 1.0d0)
-             (complex 0 (read-from-string base)))))
+             (complex 0.0d0 1.0d0)
+             (complex 0.0d0 (coerce (read-from-string base) 'double-float)))))
       ;; Hex
       ((and (>= (length clean) 2) (string= (subseq clean 0 2) "0x"))
        (parse-integer (subseq clean 2) :radix 16))
@@ -323,7 +323,9 @@
       ;; Float (contains . or e)
       ((or (find #\. clean) (find #\e clean))
        (let ((*read-default-float-format* 'double-float))
-         (read-from-string clean)))
+         ;; CL reads "5." as integer; ensure trailing-dot produces float
+         (let ((val (read-from-string clean)))
+           (if (integerp val) (coerce val 'double-float) val))))
       ;; Integer
       (t
        (parse-integer clean)))))

@@ -142,17 +142,14 @@ class TestSection61BooleanConversions:
 class TestSection61ComplexConversions:
     """6.1: Complex number arithmetic conversions."""
 
-    @pytest.mark.xfail(reason="Complex number arithmetic not yet supported")
     def test_complex_plus_int(self):
         out, _, rc = clython_run("print(1j + 2)")
         assert rc == 0 and out == "(2+1j)"
 
-    @pytest.mark.xfail(reason="Complex number arithmetic not yet supported")
     def test_complex_plus_complex(self):
         out, _, rc = clython_run("print(1j + 2j)")
         assert rc == 0 and out == "3j"
 
-    @pytest.mark.xfail(reason="Complex number arithmetic not yet supported")
     def test_complex_times_float(self):
         out, _, rc = clython_run("print(1j * 2.0)")
         assert rc == 0 and out == "2j"

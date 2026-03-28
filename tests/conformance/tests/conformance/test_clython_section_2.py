@@ -764,7 +764,6 @@ class TestSection22TokenBoundaries:
         assert rc == 0
         assert out == "7"
 
-    @pytest.mark.xfail(reason="Clython does not support __len__ dunder attribute access on lists")
     def test_dot_attribute_access(self):
         out, _, rc = clython_run("x = [1,2,3]\nprint(x.__len__())")
         assert rc == 0
@@ -982,7 +981,6 @@ class TestSection24FloatLiteralsExtended:
         assert rc == 0
         assert out == "0.5"
 
-    @pytest.mark.xfail(reason="Clython parses 5. as integer 5 rather than float 5.0")
     def test_trailing_dot_float(self):
         out, _, rc = clython_run("print(5.)")
         assert rc == 0
@@ -1037,19 +1035,16 @@ class TestSection24FloatLiteralsExtended:
 class TestSection24ImaginaryLiterals:
     """2.4/2.6: Imaginary number literals."""
 
-    @pytest.mark.xfail(reason="Clython complex number support is incomplete")
     def test_basic_imaginary(self):
         out, _, rc = clython_run("print(1j)")
         assert rc == 0
         assert out == "1j"
 
-    @pytest.mark.xfail(reason="Clython complex number support is incomplete")
     def test_float_imaginary(self):
         out, _, rc = clython_run("print(3.14j)")
         assert rc == 0
         assert out == "3.14j"
 
-    @pytest.mark.xfail(reason="Clython complex number + operator not supported")
     def test_complex_construction(self):
         out, _, rc = clython_run("print(3 + 4j)")
         assert rc == 0
@@ -1317,7 +1312,6 @@ class TestSection26FloatLiteralsExtended:
 class TestSection26ImaginaryLiteralsExtended:
     """2.6.3: Extended imaginary literal tests."""
 
-    @pytest.mark.xfail(reason="Clython complex number repr differs from CPython")
     def test_zero_imaginary(self):
         out, _, rc = clython_run("print(0j)")
         assert rc == 0
@@ -1328,7 +1322,6 @@ class TestSection26ImaginaryLiteralsExtended:
         assert rc == 0
         assert out == "<class 'complex'>"
 
-    @pytest.mark.xfail(reason="Clython complex number repr differs from CPython")
     def test_uppercase_j_suffix(self):
         out, _, rc = clython_run("print(5J)")
         assert rc == 0
