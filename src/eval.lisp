@@ -328,20 +328,24 @@
         (let ((clython.runtime:*current-kwargs* kwargs))
           (apply #'clython.runtime:py-call func args)))))
 
-(defun %call-user-function-from-cl-fn (params body closure-env args &optional is-generator)
+(defun %call-user-function-from-cl-fn (params body closure-env args &optional is-generator is-async)
   "Called from the cl-fn closure installed on user-defined functions.
    This allows py-call to work for decorators, callbacks, etc."
-  (if is-generator
-      (%make-generator-from-body params body closure-env args clython.runtime:*current-kwargs*)
-      (let ((call-env (clython.scope:env-extend closure-env)))
-        (%bind-params params args call-env clython.runtime:*current-kwargs*)
-        (handler-case
-            (progn
-              (dolist (stmt body)
-                (eval-node stmt call-env))
-              clython.runtime:+py-none+)
-          (py-return-value (ret)
-            (py-return-value-val ret))))))
+  (cond
+    (is-generator
+     (%make-generator-from-body params body closure-env args clython.runtime:*current-kwargs*))
+    (is-async
+     (%make-coroutine-from-body params body closure-env args clython.runtime:*current-kwargs*))
+    (t
+     (let ((call-env (clython.scope:env-extend closure-env)))
+       (%bind-params params args call-env clython.runtime:*current-kwargs*)
+       (handler-case
+           (progn
+             (dolist (stmt body)
+               (eval-node stmt call-env))
+             clython.runtime:+py-none+)
+         (py-return-value (ret)
+           (py-return-value-val ret)))))))
 
 (defun %make-generator-from-body (params body closure-env args kwargs)
   "Create a py-generator that lazily executes BODY using a thread."
@@ -356,24 +360,43 @@
                (eval-node stmt call-env))
            (py-return-value () nil)))))))  ;; return in generator = StopIteration
 
+(defun %make-coroutine-from-body (params body closure-env args kwargs)
+  "Create a py-coroutine that lazily executes BODY when awaited."
+  (let ((call-env (clython.scope:env-extend closure-env)))
+    (%bind-params params args call-env kwargs)
+    (clython.runtime:make-py-coroutine
+     (lambda ()
+       (handler-case
+           (progn
+             (dolist (stmt body)
+               (eval-node stmt call-env))
+             clython.runtime:+py-none+)
+         (py-return-value (ret)
+           (py-return-value-val ret)))))))
+
 (defun %call-user-function (func args &optional kwargs)
   "Call a user-defined py-function with the given evaluated arguments."
   (let* ((closure-env (clython.runtime:py-function-env func))
          (params (clython.runtime:py-function-params func))
          (body (clython.runtime:py-function-body func)))
-    ;; Check if this is a generator function
-    (if (clython.runtime:py-function-generator func)
-        (%make-generator-from-body params body closure-env args kwargs)
-        ;; Normal function call
-        (let ((call-env (clython.scope:env-extend closure-env)))
-          (%bind-params params args call-env kwargs)
-          (handler-case
-              (progn
-                (dolist (stmt body)
-                  (eval-node stmt call-env))
-                clython.runtime:+py-none+)
-            (py-return-value (ret)
-              (py-return-value-val ret)))))))
+    (cond
+      ;; Generator function
+      ((clython.runtime:py-function-generator func)
+       (%make-generator-from-body params body closure-env args kwargs))
+      ;; Async function: return a coroutine object
+      ((clython.runtime:py-function-async-p func)
+       (%make-coroutine-from-body params body closure-env args kwargs))
+      ;; Normal function call
+      (t
+       (let ((call-env (clython.scope:env-extend closure-env)))
+         (%bind-params params args call-env kwargs)
+         (handler-case
+             (progn
+               (dolist (stmt body)
+                 (eval-node stmt call-env))
+               clython.runtime:+py-none+)
+           (py-return-value (ret)
+             (py-return-value-val ret))))))))
 
 (defun %bind-params (params args env &optional kwargs)
   "Bind function parameters to argument values in ENV.
@@ -865,6 +888,151 @@
                    :kw-defaults (mapcar (lambda (d) (when d (eval-node d env))) kw-defaults)
                    :kwarg (clython.ast:arguments-kwarg params)
                    :defaults (mapcar (lambda (d) (eval-node d env)) defaults))))
+
+;;; ─── Async function definition ──────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:async-function-def-node) env)
+  (let* ((name (clython.ast:async-function-def-node-name node))
+         (params (clython.ast:async-function-def-node-args node))
+         (body (%sort-body (clython.ast:async-function-def-node-body node)))
+         (evaled-params (%eval-defaults params env))
+         (func (clython.runtime:make-py-function
+                :name name
+                :params evaled-params
+                :body body
+                :env env
+                :async-p t
+                :cl-fn (lambda (&rest args)
+                         (%call-user-function-from-cl-fn
+                          evaled-params body env args nil t)))))
+    ;; Apply decorators (in reverse order)
+    (let ((decorated func))
+      (dolist (dec-node (reverse (clython.ast:async-function-def-node-decorator-list node)))
+        (let ((dec-fn (eval-node dec-node env)))
+          (setf decorated (clython.runtime:py-call dec-fn decorated))))
+      (clython.scope:env-set name decorated env)))
+  clython.runtime:+py-none+)
+
+;;; ─── Await expression ──────────────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:await-node) env)
+  (let ((awaitable (eval-node (clython.ast:await-node-value node) env)))
+    (cond
+      ;; Awaiting a coroutine — run it to completion
+      ((typep awaitable 'clython.runtime:py-coroutine)
+       (clython.runtime:py-coroutine-run awaitable))
+      ;; Awaiting something with __await__ — call it and exhaust the iterator
+      ;; For simplicity, treat non-coroutine awaitables as already-resolved values
+      (t awaitable))))
+
+;;; ─── Async for ─────────────────────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:async-for-node) env)
+  ;; In our synchronous interpreter, async for behaves like regular for.
+  ;; Call __aiter__ / __anext__ and await any coroutines returned.
+  (let* ((iter-val (eval-node (clython.ast:async-for-node-iter node) env))
+         (target-node (clython.ast:async-for-node-target node))
+         (body (clython.ast:async-for-node-body node))
+         (orelse (clython.ast:async-for-node-orelse node))
+         ;; Call __aiter__ via py-getattr (handles class hierarchy + bound method)
+         (aiter-method (handler-case (clython.runtime:py-getattr iter-val "__aiter__")
+                         (error () nil)))
+         (iterator (if aiter-method
+                       (let ((result (clython.runtime:py-call aiter-method)))
+                         (if (typep result 'clython.runtime:py-coroutine)
+                             (clython.runtime:py-coroutine-run result)
+                             result))
+                       (clython.runtime:py-iter iter-val)))
+         (broke nil))
+    (block for-loop
+      (loop
+        (let ((anext-method (handler-case (clython.runtime:py-getattr iterator "__anext__")
+                              (error () nil))))
+          (unless anext-method (return-from for-loop))
+          (let ((next-val
+                  (handler-case
+                      ;; Call __anext__, await if it returns a coroutine
+                      (let ((result (clython.runtime:py-call anext-method)))
+                        (if (typep result 'clython.runtime:py-coroutine)
+                            (clython.runtime:py-coroutine-run result)
+                            result))
+                    ;; StopIteration / StopAsyncIteration ends the loop
+                    (clython.runtime:stop-iteration () (return-from for-loop))
+                    (clython.runtime:py-runtime-error (e)
+                      (if (or (string= (clython.runtime:py-runtime-error-class-name e) "StopIteration")
+                              (string= (clython.runtime:py-runtime-error-class-name e) "StopAsyncIteration"))
+                          (return-from for-loop)
+                          (error e)))
+                    (py-exception (e)
+                      (let ((v (py-exception-value e)))
+                        (if (and (typep v 'clython.runtime:py-exception-object)
+                                 (or (string= (clython.runtime:py-exception-class-name v) "StopIteration")
+                                     (string= (clython.runtime:py-exception-class-name v) "StopAsyncIteration")))
+                            (return-from for-loop)
+                            (error e)))))))
+            (%assign-target target-node next-val env)
+            (handler-case
+                (dolist (stmt body)
+                  (eval-node stmt env))
+              (py-break () (setf broke t) (return-from for-loop))
+              (py-continue () nil))))))
+    ;; else clause runs if loop completed without break
+    (unless broke
+      (dolist (stmt orelse)
+        (eval-node stmt env)))
+    clython.runtime:+py-none+))
+
+;;; ─── Async with ────────────────────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:async-with-node) env)
+  ;; In our synchronous interpreter, async with behaves like regular with.
+  ;; __aenter__ and __aexit__ return coroutines which we await immediately.
+  (let ((items (clython.ast:async-with-node-items node))
+        (body (clython.ast:async-with-node-body node)))
+    (%eval-async-with-items items body env)))
+
+(defun %eval-async-with-items (items body env)
+  "Evaluate async with items recursively (for nested context managers)."
+  (if (null items)
+      ;; All context managers entered, execute body
+      (handler-case
+          (progn
+            (dolist (stmt body)
+              (eval-node stmt env))
+            clython.runtime:+py-none+)
+        (py-return-value (ret)
+          (signal ret)
+          clython.runtime:+py-none+))
+      (let* ((item (first items))
+             (ctx-expr (clython.ast:with-item-context-expr item))
+             (opt-var  (clython.ast:with-item-optional-vars item))
+             (ctx-mgr (eval-node ctx-expr env))
+             ;; Call __aenter__, await if coroutine (py-getattr returns bound method)
+             (enter-method (clython.runtime:py-getattr ctx-mgr "__aenter__"))
+             (enter-result (clython.runtime:py-call enter-method))
+             (enter-val (if (typep enter-result 'clython.runtime:py-coroutine)
+                            (clython.runtime:py-coroutine-run enter-result)
+                            enter-result)))
+        ;; Bind the result if 'as' variable present
+        (when opt-var
+          (%assign-target opt-var enter-val env))
+        ;; Execute remaining items + body, then call __aexit__
+        (let ((exc nil))
+          (handler-case
+              (%eval-async-with-items (rest items) body env)
+            (error (e) (setf exc e)))
+          ;; Call __aexit__ (py-getattr returns bound method, so pass exc args only)
+          (let* ((exit-method (clython.runtime:py-getattr ctx-mgr "__aexit__"))
+                 (exit-result (clython.runtime:py-call exit-method
+                                                       clython.runtime:+py-none+
+                                                       clython.runtime:+py-none+
+                                                       clython.runtime:+py-none+))
+                 (exit-val (if (typep exit-result 'clython.runtime:py-coroutine)
+                               (clython.runtime:py-coroutine-run exit-result)
+                               exit-result)))
+            (when (and exc (not (clython.runtime:py-bool-val exit-val)))
+              (error exc))))
+        clython.runtime:+py-none+)))
 
 ;;; ─── Class definition ──────────────────────────────────────────────────────
 
