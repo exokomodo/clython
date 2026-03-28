@@ -532,7 +532,6 @@ class TestSection84TryStatementsExtended:
         )
         assert rc == 0 and out == "caught"
 
-    @pytest.mark.xfail(reason="tuple of exception types in except clause not implemented")
     def test_tuple_exception_types(self):
         out, _, rc = clython_run(
             "try:\n    raise TypeError('t')\nexcept (ValueError, TypeError) as e:\n    print('caught', e)"
@@ -551,7 +550,6 @@ class TestSection84TryStatementsExtended:
         )
         assert rc == 0 and out == "except\nfinally"
 
-    @pytest.mark.xfail(reason="finally block print output not captured when exception propagates")
     def test_finally_runs_on_unhandled_exception(self):
         out, _, rc = clython_run(
             "try:\n    try:\n        raise ValueError('v')\n    finally:\n        print('inner finally')\nexcept ValueError:\n    print('outer caught')"

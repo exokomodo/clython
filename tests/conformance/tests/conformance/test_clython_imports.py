@@ -296,7 +296,6 @@ class TestImportErrors:
         _, err, rc = clython_run("from sys import nonexistent_attr_xyz")
         assert rc != 0
 
-    @pytest.mark.xfail(reason="ImportError not catchable via try/except yet")
     def test_import_error_doesnt_crash(self):
         """Import error should raise exception, not segfault."""
         out, err, rc = clython_run(

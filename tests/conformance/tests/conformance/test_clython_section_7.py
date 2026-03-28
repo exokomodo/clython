@@ -657,7 +657,6 @@ class TestSection76ReturnStatementExtended:
         )
         assert rc == 0 and out == "42"
 
-    @pytest.mark.xfail(reason="finally block may not execute when return is in try")
     def test_return_in_try_finally(self):
         """Return in try, finally still executes."""
         out, _, rc = clython_run(
@@ -781,7 +780,6 @@ class TestSection78RaiseStatementExtended:
         )
         assert rc == 0 and "caught: boom" in out
 
-    @pytest.mark.xfail(reason="custom exception classes may not be fully implemented")
     def test_raise_custom_exception(self):
         out, _, rc = clython_run(
             "class MyError(Exception):\n    pass\ntry:\n    raise MyError('custom')\nexcept MyError as e:\n    print('caught:', e)"

@@ -1119,6 +1119,22 @@
               (error exc))))
         clython.runtime:+py-none+)))
 
+(defun %maybe-register-exception-class (name bases)
+  "If any base class is in the exception hierarchy, register NAME as an exception subclass."
+  (dolist (base bases)
+    (let ((base-name (cond
+                       ((typep base 'clython.runtime:py-type)
+                        (clython.runtime:py-type-name base))
+                       ((typep base 'clython.runtime:py-function)
+                        (clython.runtime:py-function-name base))
+                       (t nil))))
+      (when (and base-name (gethash base-name clython.runtime:*exception-hierarchy*))
+        ;; Build MRO: self + base's MRO
+        (let ((base-mro (gethash base-name clython.runtime:*exception-hierarchy*)))
+          (setf (gethash name clython.runtime:*exception-hierarchy*)
+                (cons name base-mro)))
+        (return)))))
+
 ;;; ─── Class definition ──────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:class-def-node) env)
@@ -1143,6 +1159,8 @@
                      (when fn-env
                        (clython.scope:env-set "__class__" cls fn-env)))))
                class-dict)
+      ;; Register in exception hierarchy if any base is an exception class
+      (%maybe-register-exception-class name bases)
       (clython.scope:env-set name cls env))
     clython.runtime:+py-none+))
 
@@ -1164,13 +1182,46 @@
 
 ;;; ─── Raise ──────────────────────────────────────────────────────────────────
 
+(defun %is-exception-class-p (obj)
+  "Check if OBJ is a py-type or py-function that represents an exception class."
+  (cond
+    ((typep obj 'clython.runtime:py-type)
+     (let ((name (clython.runtime:py-type-name obj)))
+       (gethash name clython.runtime:*exception-hierarchy*)))
+    ((typep obj 'clython.runtime:py-function)
+     (let ((name (clython.runtime:py-function-name obj)))
+       (gethash name clython.runtime:*exception-hierarchy*)))
+    (t nil)))
+
+(defun %py-object-to-exception (obj)
+  "Convert a py-object whose class is in the exception hierarchy to a py-exception-object."
+  (let* ((cls (clython.runtime:py-object-class obj))
+         (class-name (when (typep cls 'clython.runtime:py-type)
+                       (clython.runtime:py-type-name cls))))
+    (if (and class-name (gethash class-name clython.runtime:*exception-hierarchy*))
+        ;; Build a py-exception-object with the user object's attributes
+        (let ((exc-obj (clython.runtime:make-py-exception-object class-name)))
+          ;; Copy instance dict for attribute access
+          (let ((src-dict (clython.runtime:py-object-dict obj))
+                (dst-dict (clython.runtime:py-object-dict exc-obj)))
+            (when (and src-dict dst-dict)
+              (maphash (lambda (k v) (setf (gethash k dst-dict) v))
+                       src-dict)))
+          exc-obj)
+        obj)))
+
 (defmethod eval-node ((node clython.ast:raise-node) env)
   (if (clython.ast:raise-node-exc node)
       (let ((exc (eval-node (clython.ast:raise-node-exc node) env)))
-        ;; If exc is a py-function (exception class), call it with no args
-        (when (and (typep exc 'clython.runtime:py-function)
+        ;; If exc is a py-type/py-function (exception class), call it with no args
+        (when (and (or (typep exc 'clython.runtime:py-function)
+                       (typep exc 'clython.runtime:py-type))
                    (not (typep exc 'clython.runtime:py-exception-object)))
           (setf exc (clython.runtime:py-call exc)))
+        ;; If exc is a py-object from a user-defined exception class, convert it
+        (when (and (typep exc 'clython.runtime:py-object)
+                   (not (typep exc 'clython.runtime:py-exception-object)))
+          (setf exc (%py-object-to-exception exc)))
         (error 'py-exception :value exc))
       ;; bare raise — re-raise current exception if available
       (let ((current *current-exception*))
@@ -1181,26 +1232,42 @@
 
 ;;; ─── Try / Except ──────────────────────────────────────────────────────────
 
+(defun %exception-matches-single-type-p (exc-value handler-type)
+  "Check if exc-value matches a single handler type (a py-function or py-type)."
+  (let ((handler-name (cond
+                        ((typep handler-type 'clython.runtime:py-function)
+                         (clython.runtime:py-function-name handler-type))
+                        ((typep handler-type 'clython.runtime:py-type)
+                         (clython.runtime:py-type-name handler-type))
+                        (t nil))))
+    (when handler-name
+      (cond
+        ;; exc-value is a py-exception-object — check hierarchy
+        ((typep exc-value 'clython.runtime:py-exception-object)
+         (clython.runtime:exception-is-subclass-p
+          (clython.runtime:py-exception-class-name exc-value)
+          handler-name))
+        ;; exc-value is a string (legacy) — check if handler name appears
+        ((typep exc-value 'clython.runtime:py-str)
+         (search handler-name (clython.runtime:py-str-value exc-value)))
+        ;; fallback
+        (t nil)))))
+
 (defun %exception-matches-handler-p (exc-value handler-type-node env)
   "Check if an exception value matches the type in a handler's except clause.
-   HANDLER-TYPE-NODE is the AST node for the exception type (or NIL for bare except)."
+   HANDLER-TYPE-NODE is the AST node for the exception type (or NIL for bare except).
+   Supports both single types and tuples of types: except (TypeError, ValueError)."
   (when (null handler-type-node)
     (return-from %exception-matches-handler-p t))
   (let ((handler-type (eval-node handler-type-node env)))
-    ;; handler-type should be a py-function (exception constructor) with a name
-    (when (typep handler-type 'clython.runtime:py-function)
-      (let ((handler-name (clython.runtime:py-function-name handler-type)))
-        (cond
-          ;; exc-value is a py-exception-object — check hierarchy
-          ((typep exc-value 'clython.runtime:py-exception-object)
-           (clython.runtime:exception-is-subclass-p
-            (clython.runtime:py-exception-class-name exc-value)
-            handler-name))
-          ;; exc-value is a string (legacy) — check if handler name appears
-          ((typep exc-value 'clython.runtime:py-str)
-           (search handler-name (clython.runtime:py-str-value exc-value)))
-          ;; fallback
-          (t nil))))))
+    (cond
+      ;; Tuple of exception types — match any
+      ((typep handler-type 'clython.runtime:py-tuple)
+       (some (lambda (etype)
+               (%exception-matches-single-type-p exc-value etype))
+             (coerce (clython.runtime:py-tuple-value handler-type) 'list)))
+      ;; Single exception type
+      (t (%exception-matches-single-type-p exc-value handler-type)))))
 
 (defun %handle-exception (exc-val handlers node env)
   "Try to match exc-val against handlers. Returns T if handled, NIL otherwise.
@@ -1223,36 +1290,40 @@
     handled))
 
 (defmethod eval-node ((node clython.ast:try-node) env)
-  (let ((caught nil))
-    (handler-case
-        (progn
-          (dolist (stmt (%sort-body (clython.ast:try-node-body node)))
-            (eval-node stmt env)))
-      (py-exception (e)
-        (setf caught t)
-        (let* ((*current-exception* e)
-               (exc-val (py-exception-value e)))
-          (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
-            (error e))))
-      (clython.runtime:py-runtime-error (e)
-        (setf caught t)
-        ;; Convert runtime error to a py-exception-object for uniform handling
-        (let* ((exc-val (clython.runtime:make-py-exception-object
-                         (clython.runtime:py-runtime-error-class-name e)
-                         (list (clython.runtime:make-py-str
-                                (clython.runtime:py-runtime-error-message e)))))
-               (wrapper (make-condition 'py-exception :value exc-val))
-               (*current-exception* wrapper))
-          (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
-            (error e)))))
-    ;; else clause (runs if no exception was raised)
-    (unless caught
-      (dolist (stmt (%sort-body (clython.ast:try-node-orelse node)))
-        (eval-node stmt env)))
-    ;; finally clause (always runs)
-    (dolist (stmt (%sort-body (clython.ast:try-node-finalbody node)))
-      (eval-node stmt env)))
-  clython.runtime:+py-none+)
+  (let ((has-finally (clython.ast:try-node-finalbody node)))
+    (flet ((%try-body ()
+             (let ((caught nil))
+               (handler-case
+                   (progn
+                     (dolist (stmt (%sort-body (clython.ast:try-node-body node)))
+                       (eval-node stmt env)))
+                 (py-exception (e)
+                   (setf caught t)
+                   (let* ((*current-exception* e)
+                          (exc-val (py-exception-value e)))
+                     (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
+                       (error e))))
+                 (clython.runtime:py-runtime-error (e)
+                   (setf caught t)
+                   (let* ((exc-val (clython.runtime:make-py-exception-object
+                                    (clython.runtime:py-runtime-error-class-name e)
+                                    (list (clython.runtime:make-py-str
+                                           (clython.runtime:py-runtime-error-message e)))))
+                          (wrapper (make-condition 'py-exception :value exc-val))
+                          (*current-exception* wrapper))
+                     (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
+                       (error e)))))
+               ;; else clause (runs if no exception was raised)
+               (unless caught
+                 (dolist (stmt (%sort-body (clython.ast:try-node-orelse node)))
+                   (eval-node stmt env)))
+               clython.runtime:+py-none+)))
+      (if has-finally
+          (unwind-protect
+              (%try-body)
+            (dolist (stmt (%sort-body (clython.ast:try-node-finalbody node)))
+              (eval-node stmt env)))
+          (%try-body)))))
 
 ;;; ─── Import ─────────────────────────────────────────────────────────────────
 

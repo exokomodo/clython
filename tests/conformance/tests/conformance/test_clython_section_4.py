@@ -348,7 +348,6 @@ class TestSection43ExceptionPropagation:
         )
         assert rc == 0 and out == "deep"
 
-    @pytest.mark.xfail(reason="custom exception classes not yet fully supported")
     def test_custom_exception_class(self):
         out, _, rc = clython_run(
             "class MyError(Exception): pass\n"
@@ -359,7 +358,6 @@ class TestSection43ExceptionPropagation:
         )
         assert rc == 0 and out == "custom"
 
-    @pytest.mark.xfail(reason="exception hierarchy catching not yet supported")
     def test_exception_hierarchy_catch(self):
         """Catching parent exception type catches child."""
         out, _, rc = clython_run(
@@ -388,7 +386,6 @@ class TestSection43ExceptionPropagation:
         )
         assert rc == 0 and out == "V T"
 
-    @pytest.mark.xfail(reason="tuple except may not be implemented")
     def test_except_tuple(self):
         """Catch multiple exception types with a tuple."""
         out, _, rc = clython_run(
@@ -412,7 +409,6 @@ class TestSection43ExceptionPropagation:
         )
         assert rc == 0 and out == "caught\nfinally"
 
-    @pytest.mark.xfail(reason="finally block not executed on early return")
     def test_finally_runs_on_return(self):
         out, _, rc = clython_run(
             "def f():\n"
