@@ -747,7 +747,6 @@ class TestSection77YieldStatement:
         )
         assert rc == 0 and out == "[0, 1, 2, 3, 4]"
 
-    @pytest.mark.xfail(reason="generator send() may not be implemented")
     def test_generator_send(self):
         out, _, rc = clython_run(
             "def gen():\n    x = yield 'ready'\n    yield f'got {x}'\ng = gen()\nprint(next(g))\nprint(g.send(42))"

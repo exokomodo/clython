@@ -90,10 +90,18 @@
   "Create the sys built-in module."
   (let ((mod (clython.runtime:make-py-module "sys")))
     (setf (gethash "path" (clython.runtime:py-module-dict mod)) (make-sys-path-list))
+    ;; sys.modules — uses *module-registry* as backing store
+    ;; We populate a py-dict from the registry; it's a snapshot but updated on access
     (setf (gethash "modules" (clython.runtime:py-module-dict mod))
-          ;; Wrap *module-registry* — we'll expose it as a dict-like object later
-          ;; For now, a simple py-dict
           (let ((d (clython.runtime:make-py-dict)))
+            ;; Pre-populate with currently-loaded modules
+            (maphash (lambda (k v)
+                       (clython.runtime:py-setitem
+                        d (clython.runtime:make-py-str k) v))
+                     *module-registry*)
+            ;; Always include sys itself
+            (clython.runtime:py-setitem
+             d (clython.runtime:make-py-str "sys") mod)
             d))
     (setf (gethash "version" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-str "3.12.0 (clython)"))
@@ -124,6 +132,8 @@
                                      0)
                                  0)))
                       (sb-ext:exit :code rc)))))
+    (setf (gethash "executable" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "clython"))
     (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-str "sys"))
     mod))

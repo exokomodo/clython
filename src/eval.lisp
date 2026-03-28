@@ -584,11 +584,17 @@
 
 ;;; ─── Named expression (walrus operator) ────────────────────────────────────
 
+(defvar *comprehension-enclosing-env* nil
+  "When non-nil, walrus operator (:=) assigns to this env instead of the local scope.
+   Set by comprehension evaluation to the enclosing scope.")
+
 (defmethod eval-node ((node clython.ast:named-expr-node) env)
   (let* ((value (eval-node (clython.ast:named-expr-node-value node) env))
          (target (clython.ast:named-expr-node-target node))
-         (name (clython.ast:name-node-id target)))
-    (clython.scope:env-set name value env)
+         (name (clython.ast:name-node-id target))
+         ;; Walrus in comprehensions assigns to the enclosing scope
+         (target-env (or *comprehension-enclosing-env* env)))
+    (clython.scope:env-set name value target-env)
     value))
 
 ;;; ─── Lambda ─────────────────────────────────────────────────────────────────
@@ -601,6 +607,7 @@
   (let ((val (if (clython.ast:yield-node-value node)
                  (eval-node (clython.ast:yield-node-value node) env)
                  clython.runtime:+py-none+)))
+    ;; yield-fn returns the sent value (or py-none for next())
     (funcall *generator-yield-fn* val)))
 
 (defmethod eval-node ((node clython.ast:yield-from-node) env)
@@ -680,33 +687,36 @@
 (defmethod eval-node ((node clython.ast:list-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
         (results '()))
-    (%eval-comprehension-generators
-     (clython.ast:list-comp-node-generators node)
-     (lambda ()
-       (push (eval-node (clython.ast:list-comp-node-elt node) comp-env) results))
-     comp-env)
+    (let ((*comprehension-enclosing-env* env))
+      (%eval-comprehension-generators
+       (clython.ast:list-comp-node-generators node)
+       (lambda ()
+         (push (eval-node (clython.ast:list-comp-node-elt node) comp-env) results))
+       comp-env))
     (clython.runtime:make-py-list (nreverse results))))
 
 (defmethod eval-node ((node clython.ast:set-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
         (results '()))
-    (%eval-comprehension-generators
-     (clython.ast:set-comp-node-generators node)
-     (lambda ()
-       (push (eval-node (clython.ast:set-comp-node-elt node) comp-env) results))
-     comp-env)
+    (let ((*comprehension-enclosing-env* env))
+      (%eval-comprehension-generators
+       (clython.ast:set-comp-node-generators node)
+       (lambda ()
+         (push (eval-node (clython.ast:set-comp-node-elt node) comp-env) results))
+       comp-env))
     (clython.runtime:make-py-set (nreverse results))))
 
 (defmethod eval-node ((node clython.ast:dict-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
         (d (clython.runtime:make-py-dict)))
-    (%eval-comprehension-generators
-     (clython.ast:dict-comp-node-generators node)
-     (lambda ()
-       (let ((k (eval-node (clython.ast:dict-comp-node-key node) comp-env))
-             (v (eval-node (clython.ast:dict-comp-node-value node) comp-env)))
-         (clython.runtime:py-setitem d k v)))
-     comp-env)
+    (let ((*comprehension-enclosing-env* env))
+      (%eval-comprehension-generators
+       (clython.ast:dict-comp-node-generators node)
+       (lambda ()
+         (let ((k (eval-node (clython.ast:dict-comp-node-key node) comp-env))
+               (v (eval-node (clython.ast:dict-comp-node-value node) comp-env)))
+           (clython.runtime:py-setitem d k v)))
+       comp-env))
     d))
 
 (defmethod eval-node ((node clython.ast:generator-exp-node) env)
@@ -1362,6 +1372,19 @@
         (when (and (typep exc 'clython.runtime:py-object)
                    (not (typep exc 'clython.runtime:py-exception-object)))
           (setf exc (%py-object-to-exception exc)))
+        ;; Handle `raise X from Y` — set __cause__
+        (when (clython.ast:raise-node-cause node)
+          (let ((cause (eval-node (clython.ast:raise-node-cause node) env)))
+            (when (and (or (typep cause 'clython.runtime:py-function)
+                           (typep cause 'clython.runtime:py-type))
+                       (not (typep cause 'clython.runtime:py-exception-object)))
+              (setf cause (clython.runtime:py-call cause)))
+            (when (and (typep cause 'clython.runtime:py-object)
+                       (not (typep cause 'clython.runtime:py-exception-object)))
+              (setf cause (%py-object-to-exception cause)))
+            ;; Store cause on the exception object for __cause__ access
+            (when (typep exc 'clython.runtime:py-exception-object)
+              (setf (gethash "__cause__" (clython.runtime:py-object-dict exc)) cause))))
         (error 'py-exception :value exc))
       ;; bare raise — re-raise current exception if available
       (let ((current *current-exception*))

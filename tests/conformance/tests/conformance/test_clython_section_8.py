@@ -560,7 +560,6 @@ class TestSection84TryStatementsExtended:
         )
         assert rc == 0 and out == "inner\nouter"
 
-    @pytest.mark.xfail(reason="exception chaining (from) may not be implemented")
     def test_exception_chaining_from(self):
         out, _, rc = clython_run(
             "try:\n    try:\n        raise ValueError('original')\n    except ValueError as e:\n        raise TypeError('new') from e\nexcept TypeError as e:\n    print(type(e).__name__)\n    print(type(e.__cause__).__name__)"

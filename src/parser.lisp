@@ -1464,6 +1464,7 @@
    Returns a py-arguments instance."
   (let ((args '())
         (defaults '())
+        (posonlyargs '())
         (vararg nil)
         (kwonlyargs '())
         (kw-defaults '())
@@ -1477,6 +1478,12 @@
     (loop
       (let ((tok (ps-token ps)))
         (cond
+          ;; / — marks end of positional-only params
+          ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "/"))
+           (ps-advance ps)
+           ;; All args so far become positional-only, clear args
+           (setf posonlyargs (copy-list args)
+                 args nil))
           ;; **kwargs
           ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "**"))
            (ps-advance ps)
@@ -1524,6 +1531,7 @@
                    (string= (tok-value colon-check) ":"))
           (return))))
     (make-instance 'clython.ast:py-arguments
+                   :posonlyargs (nreverse posonlyargs)
                    :args (nreverse args)
                    :vararg vararg
                    :kwonlyargs (nreverse kwonlyargs)

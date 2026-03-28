@@ -232,7 +232,6 @@ class TestSysModule:
         out, _, rc = clython_run("import sys\nprint(sys.version_info[0])")
         assert rc == 0 and out == "3"
 
-    @pytest.mark.xfail(reason="sys.modules does not track imported modules")
     def test_sys_modules(self):
         out, _, rc = clython_run("import sys\nprint('sys' in sys.modules)")
         assert rc == 0 and out == "True"
@@ -241,7 +240,6 @@ class TestSysModule:
         out, _, rc = clython_run("import sys\nprint(type(sys.maxsize).__name__)")
         assert rc == 0 and out == "int"
 
-    @pytest.mark.xfail(reason="sys.executable not yet implemented")
     def test_sys_executable(self):
         out, _, rc = clython_run("import sys\nprint(type(sys.executable).__name__)")
         assert rc == 0 and out == "str"
@@ -269,7 +267,6 @@ class TestModuleCaching:
         )
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="sys.modules does not track imported modules")
     def test_sys_modules_populated(self):
         """After import, module appears in sys.modules."""
         out, _, rc = clython_run(

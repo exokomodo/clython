@@ -2088,6 +2088,23 @@
 (defmethod py-next ((obj py-generator))
   (py-generator-send obj :next-signal))
 
+(defmethod py-getattr ((obj py-generator) (name string))
+  (cond
+    ((string= name "send")
+     (make-py-function :name "send"
+                       :cl-fn (lambda (value)
+                                 (py-generator-send obj value))))
+    ((string= name "close")
+     (make-py-function :name "close"
+                       :cl-fn (lambda ()
+                                 (setf (py-generator-finished obj) t)
+                                 +py-none+)))
+    ((string= name "__next__")
+     (make-py-function :name "__next__"
+                       :cl-fn (lambda ()
+                                 (py-next obj))))
+    (t (call-next-method))))
+
 (defmethod py-iter ((obj py-list))
   (let ((vec (py-list-value obj))
         (i 0))
@@ -2462,7 +2479,8 @@
     (make-instance 'py-exception-object
                    :class-name class-name
                    :args args
-                   :message msg)))
+                   :message msg
+                   :py-dict (make-hash-table :test #'equal))))
 
 (defmethod py-repr ((obj py-exception-object))
   (let ((msg (py-exception-message obj)))

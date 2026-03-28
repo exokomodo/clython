@@ -1436,7 +1436,6 @@ class TestSection612Walrus:
         out, _, rc = clython_run("if (s := 'hello'):\n    print(s)")
         assert rc == 0 and out == "hello"
 
-    @pytest.mark.xfail(reason="Walrus operator in comprehensions not yet supported")
     def test_walrus_in_list_comprehension(self):
         out, _, rc = clython_run("result = [y := x + 1 for x in range(3)]\nprint(result, y)")
         assert rc == 0 and out == "[1, 2, 3] 3"
@@ -1560,7 +1559,6 @@ class TestSection614Lambdas:
         out, _, rc = clython_run("f = lambda *, x: x\nprint(f(x=5))")
         assert rc == 0 and out == "5"
 
-    @pytest.mark.xfail(reason="Positional-only parameters (/) not yet supported")
     def test_lambda_positional_only(self):
         out, _, rc = clython_run("f = lambda x, /: x\nprint(f(5))")
         assert rc == 0 and out == "5"
