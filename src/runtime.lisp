@@ -282,7 +282,7 @@
 (defun make-py-frozenset (&optional items)
   (let ((ht (make-hash-table :test #'equal)))
     (dolist (i (or items '()))
-      (setf (gethash i ht) t))
+      (setf (gethash (set-hash-key i) ht) i))
     (make-instance 'py-frozenset :value ht)))
 
 ;;; function ---------------------------------------------------------------
@@ -1028,6 +1028,90 @@
         ((string= name "copy")
          (wrap (lambda ()
                  (make-py-list (coerce vec 'list)))))
+        (t (call-next-method))))))
+
+;;; ─── Dict methods ──────────────────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-dict) (name string))
+  (let ((ht (py-dict-value obj)))
+    (flet ((wrap (fn) (make-py-function :name name :cl-fn fn)))
+      (cond
+        ((string= name "keys")
+         (wrap (lambda ()
+                 (make-py-list (mapcar #'cl-to-py (%hash-table-keys ht))))))
+        ((string= name "values")
+         (wrap (lambda ()
+                 (make-py-list (%hash-table-values ht)))))
+        ((string= name "items")
+         (wrap (lambda ()
+                 (let ((items '()))
+                   (maphash (lambda (k v)
+                              (push (make-py-tuple (list (cl-to-py k) v)) items))
+                            ht)
+                   (make-py-list (nreverse items))))))
+        ((string= name "get")
+         (wrap (lambda (key &optional default)
+                 (multiple-value-bind (val found) (gethash (dict-hash-key key) ht)
+                   (if found val (or default +py-none+))))))
+        ((string= name "update")
+         (wrap (lambda (other)
+                 (maphash (lambda (k v) (setf (gethash k ht) v))
+                          (py-dict-value other))
+                 +py-none+)))
+        ((string= name "pop")
+         (wrap (lambda (key &optional default)
+                 (let ((k (dict-hash-key key)))
+                   (multiple-value-bind (val found) (gethash k ht)
+                     (if found
+                         (progn (remhash k ht) val)
+                         (if default default
+                             (error "KeyError: ~A" (py-repr key)))))))))
+        ((string= name "setdefault")
+         (wrap (lambda (key &optional default)
+                 (let ((k (dict-hash-key key)))
+                   (multiple-value-bind (val found) (gethash k ht)
+                     (if found val
+                         (let ((d (or default +py-none+)))
+                           (setf (gethash k ht) d)
+                           d)))))))
+        ((string= name "__contains__")
+         (wrap (lambda (key)
+                 (py-bool-from-cl (nth-value 1 (gethash (dict-hash-key key) ht))))))
+        (t (call-next-method))))))
+
+;;; ─── Set methods ───────────────────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-set) (name string))
+  (let ((ht (py-set-value obj)))
+    (flet ((wrap (fn) (make-py-function :name name :cl-fn fn)))
+      (cond
+        ((string= name "add")
+         (wrap (lambda (item)
+                 (setf (gethash (set-hash-key item) ht) item)
+                 +py-none+)))
+        ((string= name "discard")
+         (wrap (lambda (item)
+                 (remhash (set-hash-key item) ht)
+                 +py-none+)))
+        ((string= name "remove")
+         (wrap (lambda (item)
+                 (unless (remhash (set-hash-key item) ht)
+                   (error "KeyError: ~A" (py-repr item)))
+                 +py-none+)))
+        ((string= name "__contains__")
+         (wrap (lambda (item)
+                 (py-bool-from-cl (nth-value 1 (gethash (set-hash-key item) ht))))))
+        (t (call-next-method))))))
+
+;;; ─── Frozenset methods ─────────────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-frozenset) (name string))
+  (let ((ht (py-frozenset-value obj)))
+    (flet ((wrap (fn) (make-py-function :name name :cl-fn fn)))
+      (cond
+        ((string= name "__contains__")
+         (wrap (lambda (item)
+                 (py-bool-from-cl (nth-value 1 (gethash (set-hash-key item) ht))))))
         (t (call-next-method))))))
 
 (defmethod py-getattr ((obj py-type) (name string))

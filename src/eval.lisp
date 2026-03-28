@@ -827,21 +827,51 @@
       (eval-node stmt env)))
   clython.runtime:+py-none+)
 
-;;; ─── Import (stub) ─────────────────────────────────────────────────────────
+;;; ─── Import ─────────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:import-node) env)
   (dolist (alias (clython.ast:import-node-names node))
     (let* ((name (clython.ast:alias-name alias))
            (asname (or (clython.ast:alias-asname alias) name))
-           (mod (clython.runtime:make-py-module name)))
-      (clython.scope:env-set asname mod env)))
+           (mod (clython.imports:import-module name)))
+      ;; For dotted imports without 'as', bind only the top-level name
+      ;; e.g. 'import os.path' binds 'os', not 'os.path'
+      (if (and (not (clython.ast:alias-asname alias))
+               (position #\. name))
+          (let ((top-name (subseq name 0 (position #\. name))))
+            (clython.scope:env-set top-name
+                                   (clython.imports:import-module top-name)
+                                   env))
+          (clython.scope:env-set asname mod env))))
   clython.runtime:+py-none+)
 
 (defmethod eval-node ((node clython.ast:import-from-node) env)
-  (dolist (alias (clython.ast:import-from-node-names node))
-    (let ((asname (or (clython.ast:alias-asname alias)
-                      (clython.ast:alias-name alias))))
-      (clython.scope:env-set asname clython.runtime:+py-none+ env)))
+  (let* ((module-name (clython.ast:import-from-node-module node))
+         (mod (clython.imports:import-module module-name)))
+    (dolist (alias (clython.ast:import-from-node-names node))
+      (let* ((name (clython.ast:alias-name alias))
+             (asname (or (clython.ast:alias-asname alias) name)))
+        (if (string= name "*")
+            ;; from X import * — copy all non-underscore-prefixed names
+            (maphash (lambda (k v)
+                       (unless (and (> (length k) 0)
+                                    (char= (char k 0) #\_))
+                         (clython.scope:env-set k v env)))
+                     (clython.runtime:py-module-dict mod))
+            ;; from X import Y / from X import Y as Z
+            (multiple-value-bind (val found)
+                (gethash name (clython.runtime:py-module-dict mod))
+              ;; If not found in dict, try importing as a submodule
+              (unless found
+                (let ((submod-name (format nil "~A.~A" module-name name)))
+                  (handler-case
+                      (progn
+                        (setf val (clython.imports:import-module submod-name))
+                        (setf found t))
+                    (error () nil))))
+              (unless found
+                (error "ImportError: cannot import name '~A' from '~A'" name module-name))
+              (clython.scope:env-set asname val env))))))
   clython.runtime:+py-none+)
 
 ;;; ─── Global / Nonlocal ─────────────────────────────────────────────────────
@@ -906,3 +936,13 @@
 (defmethod eval-node ((node clython.ast:type-alias-node) env)
   (declare (ignore env))
   clython.runtime:+py-none+)
+
+;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; Wire up import system callback
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(setf clython.imports:*eval-source-fn*
+      (lambda (source env)
+        (let* ((tokens (clython.lexer:tokenize source))
+               (ast (clython.parser:parse-module tokens)))
+          (eval-node ast env))))

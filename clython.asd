@@ -12,6 +12,7 @@
                              (:file "builtins")
                              (:file "exceptions")
                              (:file "scope")
+                             (:file "imports")
                              (:file "eval")
                              (:file "clython")
                              (:file "cli")))))

@@ -27,6 +27,7 @@
    #:+builtin-tuple+
    #:+builtin-dict+
    #:+builtin-set+
+   #:+builtin-frozenset+
    #:+builtin-abs+
    #:+builtin-min+
    #:+builtin-max+
@@ -244,6 +245,11 @@
   (if (null args)
       (make-py-set)
       (make-py-set (collect-iter (first args)))))
+
+(defbuiltin +builtin-frozenset+ "frozenset" (&rest args)
+  (if (null args)
+      (make-py-frozenset)
+      (make-py-frozenset (collect-iter (first args)))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; abs / min / max / sum
@@ -486,6 +492,7 @@
                (cons "tuple"        +builtin-tuple+)
                (cons "dict"         +builtin-dict+)
                (cons "set"          +builtin-set+)
+               (cons "frozenset"    +builtin-frozenset+)
                (cons "abs"          +builtin-abs+)
                (cons "min"          +builtin-min+)
                (cons "max"          +builtin-max+)
