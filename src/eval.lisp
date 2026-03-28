@@ -1238,8 +1238,12 @@
 
 (defmethod eval-node ((node clython.ast:class-def-node) env)
   (let* ((name (clython.ast:class-def-node-name node))
-         (bases (mapcar (lambda (b) (eval-node b env))
-                        (clython.ast:class-def-node-bases node)))
+         (explicit-bases (mapcar (lambda (b) (eval-node b env))
+                                (clython.ast:class-def-node-bases node)))
+         ;; If no explicit bases, implicitly inherit from object
+         (bases (if explicit-bases explicit-bases
+                    (let ((obj-type (clython.scope:env-get "object" env)))
+                      (if obj-type (list obj-type) nil))))
          (class-env (clython.scope:env-extend env))
          (class-dict (make-hash-table :test #'equal)))
     ;; Execute class body in class scope

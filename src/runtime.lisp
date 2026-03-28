@@ -2178,25 +2178,26 @@
 
 (defmethod py-call ((cls py-type) &rest args)
   "Instantiate a class: create an instance, then call __init__ if defined.
-   If the class is in the exception hierarchy, create a py-exception-object."
+   If the class is in the exception hierarchy, create a py-exception-object.
+   Uses MRO lookup to find inherited __init__."
   (let ((name (py-type-name cls)))
     (if (gethash name *exception-hierarchy*)
         ;; Exception class — create py-exception-object directly
         (let ((exc-obj (make-py-exception-object name args)))
           ;; Still call __init__ if user defined one
-          (let ((init-fn (let ((tdict (py-type-dict cls)))
-                           (when tdict (gethash "__init__" tdict)))))
-            (when init-fn
+          (multiple-value-bind (init-fn found)
+              (%lookup-in-class-hierarchy cls "__init__")
+            (when found
               (apply #'py-call init-fn exc-obj args)))
           exc-obj)
         ;; Normal class
-        (let* ((instance (make-instance 'py-object
-                                        :py-class cls
-                                        :py-dict (make-hash-table :test #'equal)))
-               (init-fn (let ((tdict (py-type-dict cls)))
-                          (when tdict (gethash "__init__" tdict)))))
-          (when init-fn
-            (apply #'py-call init-fn instance args))
+        (let ((instance (make-instance 'py-object
+                                       :py-class cls
+                                       :py-dict (make-hash-table :test #'equal))))
+          (multiple-value-bind (init-fn found)
+              (%lookup-in-class-hierarchy cls "__init__")
+            (when found
+              (apply #'py-call init-fn instance args)))
           instance))))
 
 ;;; __contains__ -----------------------------------------------------------

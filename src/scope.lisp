@@ -158,6 +158,12 @@
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
 (defun env-del (name env)
-  "Delete NAME from the current scope."
+  "Delete NAME from the current scope, or global scope if declared global."
+  (when (gethash name (env-globals env))
+    ;; Variable declared global — delete from root env
+    (let ((root (%find-root env)))
+      (unless (remhash name (env-bindings root))
+        (clython.runtime:py-raise "NameError" "name '~A' is not defined" name))
+      (return-from env-del t)))
   (unless (remhash name (env-bindings env))
     (clython.runtime:py-raise "NameError" "name '~A' is not defined" name)))

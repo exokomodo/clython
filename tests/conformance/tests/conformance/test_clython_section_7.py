@@ -968,7 +968,6 @@ class TestSection712GlobalStatementExtended:
         )
         assert rc == 0 and out == "100"
 
-    @pytest.mark.xfail(reason="global del may not be implemented")
     def test_global_delete(self):
         out, _, rc = clython_run(
             "x = 42\ndef f():\n    global x\n    del x\nf()\ntry:\n    print(x)\nexcept NameError:\n    print('deleted')"

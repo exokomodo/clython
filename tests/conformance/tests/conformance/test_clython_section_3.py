@@ -321,7 +321,6 @@ class TestSection32TypeHierarchy:
         out, _, rc = clython_run("print(issubclass(type, object))")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="issubclass for user-defined classes not yet supported")
     def test_user_class_is_subclass_of_object(self):
         out, _, rc = clython_run("class C: pass\nprint(issubclass(C, object))")
         assert rc == 0 and out == "True"
@@ -668,7 +667,6 @@ class TestSection33InheritanceSpecialMethods:
         )
         assert rc == 0 and out == "B-str"
 
-    @pytest.mark.xfail(reason="inherited __add__ not yet dispatched for subclasses")
     def test_inherited_add(self):
         out, _, rc = clython_run(
             "class V:\n"
