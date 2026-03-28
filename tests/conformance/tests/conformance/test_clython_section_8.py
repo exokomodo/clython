@@ -721,7 +721,6 @@ class TestSection86FunctionDefinitionsExtended:
         )
         assert rc == 0 and out == "my docstring"
 
-    @pytest.mark.xfail(reason="type annotations on functions may not be fully implemented")
     def test_type_annotations(self):
         out, _, rc = clython_run(
             "def add(a: int, b: int) -> int:\n    return a + b\nprint(add(2, 3))\nprint(add.__annotations__)"

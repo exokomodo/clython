@@ -649,6 +649,10 @@
 (defun format-py-float (v)
   "Format a double-float the way Python's repr() does."
   (cond
+    ;; NaN and Inf must come first — they fail on zerop/floor/etc.
+    ((sb-ext:float-nan-p v) "nan")
+    ((and (sb-ext:float-infinity-p v) (> v 0)) "inf")
+    ((sb-ext:float-infinity-p v) "-inf")
     ;; Special cases
     ((zerop v) (if (minusp (float-sign v)) "-0.0" "0.0"))
     ;; Integers that fit: 3.0, -1.0, etc.
@@ -700,6 +704,11 @@
 (defun %format-py-float (val &key (for-complex nil))
   "Format a double-float like Python. FOR-COMPLEX omits .0 when integer-valued."
   (cond
+    ;; Handle NaN
+    ((sb-ext:float-nan-p val) "nan")
+    ;; Handle Inf
+    ((sb-ext:float-infinity-p val)
+     (if (> val 0) "inf" "-inf"))
     ((and for-complex (= val (ftruncate val)))
      ;; Complex parts: integer-valued → no decimal (Python prints 1j not 1.0j)
      (format nil "~D" (round val)))
@@ -1767,6 +1776,7 @@
     ((string= name "__name__") (make-py-str (or (py-function-name obj) "<lambda>")))
     ((string= name "__doc__")  (let ((doc (py-function-docstring obj)))
                                 (if doc (make-py-str doc) +py-none+)))
+    ((string= name "__annotations__") (make-py-dict))  ; stub — annotations not tracked yet
     (t (call-next-method))))
 
 (defmethod py-getattr ((obj py-type) (name string))

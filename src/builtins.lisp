@@ -148,7 +148,13 @@
           ((typep obj 'py-int)   (make-py-float (float (py-int-value obj) 1.0d0)))
           ((typep obj 'py-bool)  (make-py-float (if (py-bool-raw obj) 1.0d0 0.0d0)))
           ((typep obj 'py-str)
-           (make-py-float (float (read-from-string (py-str-value obj)) 1.0d0)))
+           (let ((s (string-trim '(#\Space #\Tab #\Newline) (py-str-value obj))))
+             (cond
+               ((string-equal s "nan")  (make-py-float (sb-kernel:make-double-float #x7FF80000 0)))
+               ((string-equal s "inf")  (make-py-float sb-ext:double-float-positive-infinity))
+               ((string-equal s "+inf") (make-py-float sb-ext:double-float-positive-infinity))
+               ((string-equal s "-inf") (make-py-float sb-ext:double-float-negative-infinity))
+               (t (make-py-float (float (read-from-string s) 1.0d0))))))
           (t (clython.runtime:py-raise "TypeError" "float() argument must be a string or a real number, not '~A'"
                     (py-type-of obj)))))))
 

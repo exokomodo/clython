@@ -370,7 +370,6 @@ class TestBuiltinModules:
         out, _, rc = clython_run("import math\nprint(math.inf > 1000000)")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="math.isnan not yet implemented, returns incorrect output")
     def test_math_isnan(self):
         out, _, rc = clython_run("import math\nprint(math.isnan(float('nan')))")
         assert rc == 0 and out == "True"

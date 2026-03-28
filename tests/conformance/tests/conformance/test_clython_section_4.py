@@ -463,12 +463,10 @@ class TestSection42ClassScopeInteraction:
 class TestSection42DynamicFeatures:
     """Dynamic execution: eval, exec."""
 
-    @pytest.mark.xfail(reason="eval() may not be implemented")
     def test_eval_basic(self):
         out, _, rc = clython_run("print(eval('2 + 3'))")
         assert rc == 0 and out == "5"
 
-    @pytest.mark.xfail(reason="exec() may not be implemented")
     def test_exec_basic(self):
         out, _, rc = clython_run("exec('x = 42')\nprint(x)")
         assert rc == 0 and out == "42"
