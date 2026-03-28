@@ -329,21 +329,129 @@
        (parse-integer clean)))))
 
 (defrule parse-string-literal
-  ;; STRING -> constant-node
+  ;; STRING or FSTRING -> constant-node or joined-str-node
   (let ((tok (ps-token ps)))
-    (if (and tok (eq (tok-type tok) :string))
-        (progn
-          (ps-advance ps)
-          (make-node 'clython.ast:constant-node
-                     :value (tok-value tok)
-                     :line (tok-line tok)
-                     :col (tok-col tok)))
-        +fail+)))
+    (cond
+      ((and tok (eq (tok-type tok) :string))
+       (ps-advance ps)
+       (make-node 'clython.ast:constant-node
+                  :value (tok-value tok)
+                  :line (tok-line tok)
+                  :col (tok-col tok)))
+      ((and tok (eq (tok-type tok) :fstring))
+       (ps-advance ps)
+       (%parse-fstring-value (tok-value tok) (tok-line tok) (tok-col tok)))
+      (t +fail+))))
 
 ;; Concatenated strings: multiple adjacent STRING tokens
 ;; Each part keeps its raw token value; concatenation happens at eval time
 ;; by unquoting each part individually. For single strings, the raw value
 ;; is kept as-is. For adjacent strings, we store a special marker list.
+(defun %parse-fstring-value (raw-value line col)
+  "Parse an f-string token value into a joined-str-node.
+   RAW-VALUE is like f'text {expr} more' — includes the prefix and quotes."
+  (let* ((stripped (%unquote-fstring-raw raw-value))
+         (parts (%split-fstring stripped line col)))
+    (if (= (length parts) 1)
+        (first parts)
+        (make-instance 'clython.ast:joined-str-node
+                       :values parts
+                       :line line :col col))))
+
+(defun %unquote-fstring-raw (raw)
+  "Strip the f-string prefix and quotes from the raw token value.
+   e.g. f'hello {x}' → hello {x}"
+  (let* ((s raw)
+         ;; Skip prefix characters (f, r, b, etc.)
+         (start 0))
+    (loop while (and (< start (length s))
+                     (member (char-downcase (char s start)) '(#\f #\r #\b #\u)))
+          do (incf start))
+    (setf s (subseq s start))
+    ;; Strip quotes
+    (cond
+      ((and (>= (length s) 6)
+            (string= (subseq s 0 3) "\"\"\"")
+            (string= (subseq s (- (length s) 3)) "\"\"\""))
+       (subseq s 3 (- (length s) 3)))
+      ((and (>= (length s) 6)
+            (string= (subseq s 0 3) "'''")
+            (string= (subseq s (- (length s) 3)) "'''"))
+       (subseq s 3 (- (length s) 3)))
+      ((and (>= (length s) 2)
+            (or (char= (char s 0) #\') (char= (char s 0) #\"))
+            (char= (char s 0) (char s (1- (length s)))))
+       (subseq s 1 (1- (length s))))
+      (t s))))
+
+(defun %split-fstring (body line col)
+  "Split an f-string body into a list of constant-node and formatted-value-node parts.
+   Handles { and } delimiters, {{ and }} escapes."
+  (let ((parts '())
+        (text (make-string-output-stream))
+        (i 0)
+        (len (length body)))
+    (flet ((flush-text ()
+             (let ((s (get-output-stream-string text)))
+               (when (plusp (length s))
+                 (push (make-instance 'clython.ast:constant-node
+                                      :value (format nil "'~A'" s)
+                                      :line line :col col)
+                       parts)))))
+      (loop while (< i len) do
+        (let ((ch (char body i)))
+          (cond
+            ;; Escaped {{ → literal {
+            ((and (char= ch #\{) (< (1+ i) len) (char= (char body (1+ i)) #\{))
+             (write-char #\{ text)
+             (incf i 2))
+            ;; Escaped }} → literal }
+            ((and (char= ch #\}) (< (1+ i) len) (char= (char body (1+ i)) #\}))
+             (write-char #\} text)
+             (incf i 2))
+            ;; Start of expression
+            ((char= ch #\{)
+             (flush-text)
+             ;; Find the matching }
+             (let ((depth 1)
+                   (start (1+ i))
+                   (j (1+ i)))
+               (loop while (and (< j len) (plusp depth)) do
+                 (case (char body j)
+                   (#\{ (incf depth))
+                   (#\} (decf depth)))
+                 (when (plusp depth) (incf j)))
+               ;; body[start..j-1] is the expression (j points past closing })
+               (let* ((expr-src (subseq body start (max start j)))
+                      (expr-node (%parse-fstring-expr expr-src line col)))
+                 (push expr-node parts))
+               (setf i (1+ j))))
+            ;; Normal character
+            (t
+             (write-char ch text)
+             (incf i)))))
+      (flush-text))
+    (nreverse parts)))
+
+(defun %parse-fstring-expr (source line col)
+  "Parse an f-string expression source into a formatted-value-node."
+  (handler-case
+      (let* ((tokens (clython.lexer:tokenize source))
+             (ps (make-parser-state tokens))
+             (expr (parse-expression-internal ps)))
+        (if (failp expr)
+            ;; Fallback: treat as literal
+            (make-instance 'clython.ast:constant-node
+                           :value (format nil "'~A'" source)
+                           :line line :col col)
+            (make-instance 'clython.ast:formatted-value-node
+                           :value expr
+                           :line line :col col)))
+    (error ()
+      (make-instance 'clython.ast:constant-node
+                     :value (format nil "'~A'" source)
+                     :line line :col col))))
+
 (defrule parse-strings
   (let ((first (parse-string-literal ps)))
     (if (failp first)
@@ -2347,7 +2455,7 @@
          (make-node 'clython.ast:match-singleton-node :value val
                     :line (tok-line tok) :col (tok-col tok))))
       ;; Number or string
-      ((or (eq (tok-type tok) :number) (eq (tok-type tok) :string))
+      ((or (eq (tok-type tok) :number) (eq (tok-type tok) :string) (eq (tok-type tok) :fstring))
        (let ((expr (parse-atom ps)))
          (if (failp expr) +fail+
              (make-node 'clython.ast:match-value-node :value expr
