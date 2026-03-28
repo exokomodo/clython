@@ -715,7 +715,6 @@ class TestSection86FunctionDefinitionsExtended:
         )
         assert rc == 0 and out == "4"
 
-    @pytest.mark.xfail(reason="function __doc__ attribute not implemented")
     def test_function_docstring(self):
         out, _, rc = clython_run(
             "def f():\n    '''my docstring'''\n    return 42\nprint(f.__doc__)"
@@ -894,7 +893,6 @@ class TestSection87ClassDefinitionsExtended:
         )
         assert rc == 0 and out == "20"
 
-    @pytest.mark.xfail(reason="class __doc__ attribute not implemented")
     def test_class_docstring(self):
         out, _, rc = clython_run(
             "class C:\n    '''my class doc'''\n    pass\nprint(C.__doc__)"

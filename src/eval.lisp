@@ -178,29 +178,56 @@
 (defmethod eval-node ((node clython.ast:name-node) env)
   (clython.scope:env-get (clython.ast:name-node-id node) env))
 
+(defun %eval-elts-with-star (elts env)
+  "Evaluate a list of element nodes, expanding starred nodes inline."
+  (let ((result nil))
+    (dolist (elt elts (nreverse result))
+      (if (typep elt 'clython.ast:starred-node)
+          ;; Unpack the iterable
+          (let ((val (eval-node (clython.ast:starred-node-value elt) env)))
+            (cond
+              ((typep val 'clython.runtime:py-list)
+               (loop for item across (clython.runtime:py-list-value val)
+                     do (push item result)))
+              ((typep val 'clython.runtime:py-tuple)
+               (loop for item across (clython.runtime:py-tuple-value val)
+                     do (push item result)))
+              (t ;; generic iterable — use py-iter/py-next
+               (let ((it (clython.runtime:py-iter val)))
+                 (handler-case
+                     (loop (push (clython.runtime:py-next it) result))
+                   (clython.runtime:stop-iteration () nil))))))
+          (push (eval-node elt env) result)))))
+
 (defmethod eval-node ((node clython.ast:list-node) env)
-  (let ((items (mapcar (lambda (elt) (eval-node elt env))
-                       (clython.ast:list-node-elts node))))
-    (clython.runtime:make-py-list items)))
+  (clython.runtime:make-py-list (%eval-elts-with-star
+                                  (clython.ast:list-node-elts node) env)))
 
 (defmethod eval-node ((node clython.ast:tuple-node) env)
-  (let ((items (mapcar (lambda (elt) (eval-node elt env))
-                       (clython.ast:tuple-node-elts node))))
-    (clython.runtime:make-py-tuple items)))
+  (clython.runtime:make-py-tuple (%eval-elts-with-star
+                                   (clython.ast:tuple-node-elts node) env)))
 
 (defmethod eval-node ((node clython.ast:dict-node) env)
   (let ((d (clython.runtime:make-py-dict)))
     (loop for k-node in (clython.ast:dict-node-keys node)
           for v-node in (clython.ast:dict-node-values node)
-          do (let ((k (eval-node k-node env))
-                   (v (eval-node v-node env)))
-               (clython.runtime:py-setitem d k v)))
+          do (if (null k-node)
+                 ;; **unpacking: k-node is nil, v-node is the dict to unpack
+                 (let ((src (eval-node v-node env)))
+                   (when (typep src 'clython.runtime:py-dict)
+                     (maphash (lambda (k v)
+                                (clython.runtime:py-setitem
+                                 d (clython.runtime:make-py-str k) v))
+                              (clython.runtime:py-dict-value src))))
+                 ;; Normal key: value
+                 (let ((k (eval-node k-node env))
+                       (v (eval-node v-node env)))
+                   (clython.runtime:py-setitem d k v))))
     d))
 
 (defmethod eval-node ((node clython.ast:set-node) env)
-  (let ((items (mapcar (lambda (elt) (eval-node elt env))
-                       (clython.ast:set-node-elts node))))
-    (clython.runtime:make-py-set items)))
+  (clython.runtime:make-py-set (%eval-elts-with-star
+                                 (clython.ast:set-node-elts node) env)))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Expressions
@@ -888,14 +915,14 @@
 ;;; ─── Function definition ──────────────────────────────────────────────────
 
 (defun %extract-docstring (body)
-  "If the first statement in BODY is a string constant (expr-stmt of a constant-node), return its value."
+  "If the first statement in BODY is a string constant (expr-stmt of a constant-node), return its value (unquoted)."
   (when body
     (let ((first-stmt (first body)))
       (when (typep first-stmt 'clython.ast:expr-stmt-node)
         (let ((val (clython.ast:expr-stmt-node-value first-stmt)))
           (when (and (typep val 'clython.ast:constant-node)
                      (stringp (clython.ast:constant-node-value val)))
-            (clython.ast:constant-node-value val)))))))
+            (%unquote-string (clython.ast:constant-node-value val))))))))
 
 (defmethod eval-node ((node clython.ast:function-def-node) env)
   (let* ((name (clython.ast:function-def-node-name node))

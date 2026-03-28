@@ -1665,7 +1665,6 @@ class TestSection615ExpressionLists:
         out, _, rc = clython_run("def f():\n    return 1, 2, 3\nprint(f())")
         assert rc == 0 and out == "(1, 2, 3)"
 
-    @pytest.mark.xfail(reason="Star unpacking in list literals not yet supported")
     def test_starred_in_list_literal(self):
         out, _, rc = clython_run("print([1, *[2, 3], 4])")
         assert rc == 0 and out == "[1, 2, 3, 4]"
