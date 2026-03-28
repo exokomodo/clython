@@ -613,7 +613,11 @@
                (cons "classmethod"  +builtin-classmethod+)
                (cons "property"     +builtin-property+)
                (cons "format"       +builtin-format+)
-               (cons "object"       (make-py-type :name "object")))))
+               (cons "object"       (make-py-type :name "object"))
+               ;; Constants
+               (cons "Ellipsis"     clython.runtime:+py-ellipsis+)
+               (cons "NotImplemented" clython.runtime:+py-none+)  ; stub for now
+               )))
     (dolist (pair pairs)
       (setf (gethash (car pair) *builtins*) (cdr pair)))))
 

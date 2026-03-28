@@ -96,6 +96,8 @@
 
    ;; Singletons
    #:+py-none+
+   #:py-ellipsis
+   #:+py-ellipsis+
    #:+py-true+
    #:+py-false+
 
@@ -232,6 +234,12 @@
 
 (defvar +py-none+ (make-instance 'py-none))
 
+;;; Ellipsis ---------------------------------------------------------------
+(defclass py-ellipsis (py-object) ()
+  (:documentation "Python Ellipsis (...)."))
+
+(defvar +py-ellipsis+ (make-instance 'py-ellipsis))
+
 ;;; bool -------------------------------------------------------------------
 (defclass py-bool (py-object)
   ((%value :initarg :value :reader py-bool-raw :type boolean))
@@ -353,10 +361,11 @@
    (%env       :initarg :env       :accessor py-function-env       :initform nil)
    (%cl-fn     :initarg :cl-fn     :accessor py-function-cl-fn     :initform nil)
    (%generator :initarg :generator :accessor py-function-generator :initform nil)
-   (%async-p   :initarg :async-p   :accessor py-function-async-p   :initform nil))
+   (%async-p   :initarg :async-p   :accessor py-function-async-p   :initform nil)
+   (%docstring :initarg :docstring :accessor py-function-docstring :initform nil))
   (:documentation "Python function or lambda."))
 
-(defun make-py-function (&key name params body env cl-fn generator async-p)
+(defun make-py-function (&key name params body env cl-fn generator async-p docstring)
   (make-instance 'py-function
                  :name (or name "<lambda>")
                  :params (or params '())
@@ -364,7 +373,8 @@
                  :env env
                  :cl-fn cl-fn
                  :generator generator
-                 :async-p async-p))
+                 :async-p async-p
+                 :docstring docstring))
 
 ;;; method -----------------------------------------------------------------
 (defclass py-super (py-object)
@@ -623,6 +633,8 @@
 
 (defmethod py-repr ((obj py-none))   "None")
 (defmethod py-str-of ((obj py-none)) "None")
+(defmethod py-repr ((obj py-ellipsis))   "Ellipsis")
+(defmethod py-str-of ((obj py-ellipsis)) "Ellipsis")
 
 (defmethod py-repr ((obj py-bool))
   (if (py-bool-raw obj) "True" "False"))

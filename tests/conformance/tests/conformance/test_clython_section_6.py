@@ -213,7 +213,6 @@ class TestSection62BuiltinConstants:
         out, _, rc = clython_run("print(None)")
         assert rc == 0 and out == "None"
 
-    @pytest.mark.xfail(reason="Ellipsis literal prints None instead of Ellipsis")
     def test_ellipsis(self):
         out, _, rc = clython_run("print(...)")
         assert rc == 0 and out == "Ellipsis"

@@ -163,7 +163,7 @@
       ((eq val t)        clython.runtime:+py-true+)
       ((eq val nil)      clython.runtime:+py-false+)
       ((eq val :none)    clython.runtime:+py-none+)
-      ((eq val :ellipsis) clython.runtime:+py-none+)  ; stub
+      ((eq val :ellipsis) clython.runtime:+py-ellipsis+)
       ((integerp val)    (clython.runtime:make-py-int val))
       ((floatp val)      (clython.runtime:make-py-float (coerce val 'double-float)))
       ((complexp val)    (clython.runtime:make-py-complex val))
