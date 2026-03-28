@@ -86,8 +86,20 @@
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
 (defbuiltin +builtin-print+ "print" (&rest args)
-  (format t "~{~A~^ ~}~%" (mapcar #'py-str-of args))
-  +py-none+)
+  (let* ((kwargs *current-kwargs*)
+         (sep-pair (assoc "sep" kwargs :test #'string=))
+         (end-pair (assoc "end" kwargs :test #'string=))
+         (sep (if (and sep-pair (typep (cdr sep-pair) 'py-str))
+                  (py-str-value (cdr sep-pair))
+                  " "))
+         (end (if (and end-pair (typep (cdr end-pair) 'py-str))
+                  (py-str-value (cdr end-pair))
+                  (string #\Newline))))
+    (format t "~{~A~}" (loop for (obj . rest) on (mapcar #'py-str-of args)
+                              collect obj
+                              when rest collect sep))
+    (write-string end)
+    +py-none+))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; repr / str

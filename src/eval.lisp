@@ -295,28 +295,33 @@
 ;;; ─── Function/method calls ─────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:call-node) env)
-  (let ((func (eval-node (clython.ast:call-node-func node) env))
-        (args (mapcar (lambda (a) (eval-node a env))
-                      (clython.ast:call-node-args node)))
-        (kwargs (clython.ast:call-node-keywords node)))
-    (declare (ignore kwargs)) ; TODO: keyword argument support
+  (let* ((func (eval-node (clython.ast:call-node-func node) env))
+         (args (mapcar (lambda (a) (eval-node a env))
+                       (clython.ast:call-node-args node)))
+         (kw-nodes (clython.ast:call-node-keywords node))
+         ;; Evaluate keyword arguments into an alist ((name . value) ...)
+         (kwargs (mapcar (lambda (kw)
+                           (cons (clython.ast:keyword-arg kw)
+                                 (eval-node (clython.ast:keyword-value kw) env)))
+                         kw-nodes)))
     ;; Check if this is a user-defined py-function with AST body (not a cl-fn builtin)
     (if (and (typep func 'clython.runtime:py-function)
              (clython.runtime:py-function-body func)
              (not (clython.runtime:py-function-cl-fn func)))
         ;; User-defined function: set up scope, bind params, eval body
-        (%call-user-function func args)
-        ;; Builtin or cl-fn backed function
-        (apply #'clython.runtime:py-call func args))))
+        (%call-user-function func args kwargs)
+        ;; Builtin or cl-fn backed function: pass kwargs via special variable
+        (let ((clython.runtime:*current-kwargs* kwargs))
+          (apply #'clython.runtime:py-call func args)))))
 
-(defun %call-user-function (func args)
+(defun %call-user-function (func args &optional kwargs)
   "Call a user-defined py-function with the given evaluated arguments."
   (let* ((closure-env (clython.runtime:py-function-env func))
          (call-env (clython.scope:env-extend closure-env))
          (params (clython.runtime:py-function-params func))
          (body (clython.runtime:py-function-body func)))
-    ;; Bind positional arguments
-    (%bind-params params args call-env)
+    ;; Bind positional arguments and keyword arguments
+    (%bind-params params args call-env kwargs)
     ;; Execute body, catching return
     (handler-case
         (progn
@@ -326,9 +331,9 @@
       (py-return-value (ret)
         (py-return-value-val ret)))))
 
-(defun %bind-params (params args env)
+(defun %bind-params (params args env &optional kwargs)
   "Bind function parameters to argument values in ENV.
-   PARAMS is a py-arguments object."
+   PARAMS is a py-arguments object. KWARGS is an alist of (name . value)."
   (when (null params) (return-from %bind-params))
   (let* ((positional-params
            (append (or (clython.ast:arguments-posonlyargs params) nil)
@@ -340,19 +345,26 @@
          (vararg (clython.ast:arguments-vararg params))
          (kwonlyargs (or (clython.ast:arguments-kwonlyargs params) nil))
          (kw-defaults (or (clython.ast:arguments-kw-defaults params) nil))
-         (kwarg (clython.ast:arguments-kwarg params)))
-    ;; Bind positional args
+         (kwarg (clython.ast:arguments-kwarg params))
+         (remaining-kwargs (copy-list (or kwargs nil))))
+    ;; Bind positional args (also check kwargs for missing positional params)
     (loop for i below num-positional
           for param in positional-params
           for name = (clython.ast:arg-arg param)
-          do (if (< i (length args))
-                 (clython.scope:env-set name (nth i args) env)
-                 ;; Use default if available
-                 (let ((default-idx (- i num-required)))
-                   (if (and (>= default-idx 0) (< default-idx num-defaults))
-                       (clython.scope:env-set name (nth default-idx defaults) env)
-                       (error "TypeError: ~A() missing required positional argument: '~A'"
-                              "function" name)))))
+          do (cond
+               ((< i (length args))
+                (clython.scope:env-set name (nth i args) env))
+               ;; Check kwargs for this parameter
+               ((assoc name remaining-kwargs :test #'string=)
+                (let ((pair (assoc name remaining-kwargs :test #'string=)))
+                  (clython.scope:env-set name (cdr pair) env)
+                  (setf remaining-kwargs (remove pair remaining-kwargs))))
+               ;; Use default if available
+               (t (let ((default-idx (- i num-required)))
+                    (if (and (>= default-idx 0) (< default-idx num-defaults))
+                        (clython.scope:env-set name (nth default-idx defaults) env)
+                        (error "TypeError: ~A() missing required positional argument: '~A'"
+                               "function" name))))))
     ;; Bind *args
     (when vararg
       (let ((extra-args (if (> (length args) num-positional)
@@ -361,19 +373,26 @@
         (clython.scope:env-set (clython.ast:arg-arg vararg)
                                (clython.runtime:make-py-tuple extra-args)
                                env)))
-    ;; Bind keyword-only args (with defaults)
+    ;; Bind keyword-only args (check kwargs, then use defaults)
     (loop for param in kwonlyargs
           for default in kw-defaults
           for name = (clython.ast:arg-arg param)
-          do (if default
-                 (clython.scope:env-set name default env)
-                 ;; No default — would need a keyword arg, skip for now
-                 nil))
-    ;; Bind **kwargs
+          do (let ((kwpair (assoc name remaining-kwargs :test #'string=)))
+               (cond
+                 (kwpair
+                  (clython.scope:env-set name (cdr kwpair) env)
+                  (setf remaining-kwargs (remove kwpair remaining-kwargs)))
+                 (default
+                  (clython.scope:env-set name default env)))))
+    ;; Bind **kwargs (collect remaining kwargs)
     (when kwarg
-      (clython.scope:env-set (clython.ast:arg-arg kwarg)
-                             (clython.runtime:make-py-dict)
-                             env))))
+      (let ((d (clython.runtime:make-py-dict)))
+        (dolist (pair remaining-kwargs)
+          (when (car pair)
+            (clython.runtime:py-setitem d
+                                        (clython.runtime:make-py-str (car pair))
+                                        (cdr pair))))
+        (clython.scope:env-set (clython.ast:arg-arg kwarg) d env)))))
 
 ;;; ─── Attribute access ───────────────────────────────────────────────────────
 
@@ -421,12 +440,13 @@
 ;;; ─── Lambda ─────────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:lambda-node) env)
-  (clython.runtime:make-py-function
-   :name "<lambda>"
-   :params (clython.ast:lambda-node-args node)
-   :body (list (make-instance 'clython.ast:return-node
-                              :value (clython.ast:lambda-node-body node)))
-   :env env))
+  (let ((evaled-params (%eval-defaults (clython.ast:lambda-node-args node) env)))
+    (clython.runtime:make-py-function
+     :name "<lambda>"
+     :params evaled-params
+     :body (list (make-instance 'clython.ast:return-node
+                                :value (clython.ast:lambda-node-body node)))
+     :env env)))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Comprehensions
