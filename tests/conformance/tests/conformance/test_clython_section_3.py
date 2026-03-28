@@ -382,7 +382,6 @@ class TestSection33AugmentedAssignment:
 class TestSection33UnaryOperations:
     """Unary operations: __pos__, __abs__, __invert__."""
 
-    @pytest.mark.xfail(reason="__pos__ unary operator not yet implemented for custom classes")
     def test_pos(self):
         out, _, rc = clython_run(
             "class V:\n"
@@ -392,7 +391,6 @@ class TestSection33UnaryOperations:
         )
         assert rc == 0 and out == "5"
 
-    @pytest.mark.xfail(reason="__abs__ via abs() may not be implemented for custom classes")
     def test_abs(self):
         out, _, rc = clython_run(
             "class V:\n"
@@ -402,7 +400,6 @@ class TestSection33UnaryOperations:
         )
         assert rc == 0 and out == "5"
 
-    @pytest.mark.xfail(reason="__invert__ via ~ may not be implemented for custom classes")
     def test_invert(self):
         out, _, rc = clython_run(
             "class V:\n"
@@ -416,7 +413,6 @@ class TestSection33UnaryOperations:
 class TestSection33MoreComparisons:
     """Additional comparison dunders: __ne__, __le__, __gt__, __ge__."""
 
-    @pytest.mark.xfail(reason="__ne__ dispatch not yet correct for custom classes")
     def test_ne(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -426,7 +422,6 @@ class TestSection33MoreComparisons:
         )
         assert rc == 0 and out == "True\nFalse"
 
-    @pytest.mark.xfail(reason="__le__ operator not yet implemented for custom classes")
     def test_le(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -436,7 +431,6 @@ class TestSection33MoreComparisons:
         )
         assert rc == 0 and out == "True\nTrue\nFalse"
 
-    @pytest.mark.xfail(reason="__gt__ operator not yet implemented for custom classes")
     def test_gt(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -446,7 +440,6 @@ class TestSection33MoreComparisons:
         )
         assert rc == 0 and out == "True\nFalse"
 
-    @pytest.mark.xfail(reason="__ge__ operator not yet implemented for custom classes")
     def test_ge(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -460,7 +453,6 @@ class TestSection33MoreComparisons:
 class TestSection33HashProtocol:
     """__hash__ protocol for custom classes."""
 
-    @pytest.mark.xfail(reason="__hash__ may not be implemented for custom classes")
     def test_custom_hash(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -474,7 +466,6 @@ class TestSection33HashProtocol:
 class TestSection33DelitemProtocol:
     """__delitem__ protocol."""
 
-    @pytest.mark.xfail(reason="__delitem__ may not be implemented for custom classes")
     def test_delitem(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -488,7 +479,6 @@ class TestSection33DelitemProtocol:
 class TestSection33ContextManagerProtocol:
     """__enter__/__exit__ context manager protocol."""
 
-    @pytest.mark.xfail(reason="context manager protocol may not be implemented")
     def test_context_manager_basic(self):
         out, _, rc = clython_run(
             "class CM:\n"

@@ -1065,7 +1065,7 @@
               (exc-info
                (error exc-info))
               ;; No exception
-              (t result))))))))
+              (t result)))))))
 
 ;;; ─── Async with ────────────────────────────────────────────────────────────
 

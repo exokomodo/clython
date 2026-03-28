@@ -592,7 +592,6 @@ class TestSection84TryStatementsExtended:
 
 # ── 8.5 With Statements ───────────────────────────────────────────────────
 
-@pytest.mark.xfail(reason="with statements not implemented")
 class TestSection85WithStatements:
     """With statement tests based on AST conformance suite."""
 
@@ -651,7 +650,6 @@ class TestSection85WithStatements:
         )
         assert rc == 0 and out == "exit\ncaught"
 
-    @pytest.mark.xfail(reason="multiple context managers in single with may not be implemented")
     def test_multiple_context_managers(self):
         out, _, rc = clython_run(
             "class CM:\n"
