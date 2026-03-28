@@ -901,7 +901,6 @@ class TestSection23IdentifierContexts:
 class TestSection23InvalidIdentifiers:
     """2.3: Invalid identifier patterns."""
 
-    @pytest.mark.xfail(reason="Clython does not reject digit-start identifiers")
     def test_digit_start_fails(self):
         _, _, rc = clython_run("1invalid = 1")
         assert rc != 0
@@ -1240,7 +1239,6 @@ class TestSection25StringConcatenationRules:
         assert rc == 0
         assert out == "hello world"
 
-    @pytest.mark.xfail(reason="Clython may not enforce string+bytes concat error")
     def test_string_bytes_concat_fails(self):
         _, _, rc = clython_run("x = 'hello' b'world'")
         assert rc != 0

@@ -359,6 +359,14 @@
                    ;; Complex suffix j/J
                    (when (member (ls-char ls) '(#\j #\J))
                      (write-char (ls-advance ls) buf)))))))
+        ;; Reject digit-start identifiers like 1invalid (SyntaxError in CPython)
+        (when (and (ls-char ls)
+                   (identifier-start-p (ls-char ls))
+                   ;; Don't reject j/J — already consumed as complex suffix
+                   )
+          (error 'lexer-error
+                 :message "invalid decimal literal"
+                 :line save-line :column save-col))
         (ls-emit ls :number value save-line save-col)))))
 
 (defun scan-identifier (ls)

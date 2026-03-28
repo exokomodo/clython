@@ -505,6 +505,15 @@
                      :value (format nil "'~A'" source)
                      :line line :col col))))
 
+(defun %string-token-is-bytes (raw)
+  "Return T if the raw token string is a bytes literal (b prefix)."
+  (and (stringp raw)
+       (> (length raw) 0)
+       (let ((i 0))
+         (when (find (char raw i) "rR") (incf i))
+         (and (< i (length raw))
+              (find (char raw i) "bB")))))
+
 (defrule parse-strings
   (let ((first (parse-string-literal ps)))
     (if (failp first)
@@ -517,13 +526,21 @@
               (push (clython.ast:constant-node-value next) rest-parts)))
           (if (null rest-parts)
               first
-              ;; Store all parts as a list so eval can unquote each individually
-              (make-node 'clython.ast:constant-node
-                         :value (cons :concat-strings
-                                      (cons (clython.ast:constant-node-value first)
-                                            (nreverse rest-parts)))
-                         :line (clython.ast:node-line first)
-                         :col (clython.ast:node-col first)))))))
+              ;; Check for mixed string/bytes concatenation
+              (let* ((all-parts (cons (clython.ast:constant-node-value first)
+                                      (nreverse rest-parts)))
+                     (first-is-bytes (%string-token-is-bytes (car all-parts)))
+                     (mixed (find-if (lambda (p)
+                                       (not (eq first-is-bytes
+                                                (%string-token-is-bytes p))))
+                                     (cdr all-parts))))
+                (when mixed
+                  (error "SyntaxError: cannot mix bytes and nonbytes literals"))
+                ;; Store all parts as a list so eval can unquote each individually
+                (make-node 'clython.ast:constant-node
+                           :value (cons :concat-strings all-parts)
+                           :line (clython.ast:node-line first)
+                           :col (clython.ast:node-col first))))))))
 
 (defrule parse-keyword-constant
   ;; True, False, None, ... (Ellipsis)
