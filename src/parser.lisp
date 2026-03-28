@@ -2535,9 +2535,49 @@
                    :cases (nreverse cases)
                    :line (tok-line tok) :col (tok-col tok))))))
 
-(defrule parse-match-pattern
-  ;; Simplified pattern parsing - handles common patterns
-  ;; Full pattern matching would need much more work
+(defrule parse-match-or-pattern
+  ;; or_pattern: closed_pattern ('|' closed_pattern)*
+  ;; This is the top-level pattern entry point.
+  (let ((first (parse-match-as-pattern ps)))
+    (when (failp first) (return-from nil +fail+))
+    (let ((alternatives (list first)))
+      (loop
+        (let ((pipe-tok (ps-token ps)))
+          (unless (and pipe-tok (eq (tok-type pipe-tok) :op) (string= (tok-value pipe-tok) "|"))
+            (return)))
+        (ps-advance ps)
+        (let ((alt (parse-match-as-pattern ps)))
+          (when (failp alt) (return))
+          (push alt alternatives)))
+      (if (= (length alternatives) 1)
+          first
+          (make-node 'clython.ast:match-or-node
+                     :patterns (nreverse alternatives)
+                     :line (clython.ast:node-line first)
+                     :col (clython.ast:node-col first))))))
+
+(defrule parse-match-as-pattern
+  ;; as_pattern: pattern 'as' NAME | or_pattern
+  (let ((inner (parse-match-closed-pattern ps)))
+    (when (failp inner) (return-from nil +fail+))
+    (let ((as-tok (ps-token ps)))
+      (if (and as-tok (eq (tok-type as-tok) :keyword) (string= (tok-value as-tok) "as"))
+          (progn
+            (ps-advance ps)
+            (let ((name-tok (ps-token ps)))
+              (if (and name-tok (eq (tok-type name-tok) :name))
+                  (progn
+                    (ps-advance ps)
+                    (make-node 'clython.ast:match-as-node
+                               :pattern inner
+                               :name (tok-value name-tok)
+                               :line (clython.ast:node-line inner)
+                               :col (clython.ast:node-col inner)))
+                  +fail+)))
+          inner))))
+
+(defrule parse-match-closed-pattern
+  ;; closed_pattern: literal | capture | wildcard | sequence | group | ...
   (let ((tok (ps-token ps)))
     (cond
       ;; Wildcard _
@@ -2545,7 +2585,7 @@
        (ps-advance ps)
        (make-node 'clython.ast:match-as-node :pattern nil :name nil
                   :line (tok-line tok) :col (tok-col tok)))
-      ;; Constants
+      ;; Constants: True, False, None
       ((and tok (eq (tok-type tok) :keyword)
             (member (tok-value tok) '("True" "False" "None") :test #'string=))
        (let ((val (cond ((string= (tok-value tok) "True") t)
@@ -2554,7 +2594,22 @@
          (ps-advance ps)
          (make-node 'clython.ast:match-singleton-node :value val
                     :line (tok-line tok) :col (tok-col tok))))
-      ;; Number or string
+      ;; Negative number: - NUMBER
+      ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "-"))
+       (let ((saved (ps-save ps)))
+         (ps-advance ps)
+         (let ((num-tok (ps-token ps)))
+           (if (and num-tok (eq (tok-type num-tok) :number))
+               (let ((expr (parse-atom ps)))
+                 (if (failp expr)
+                     (progn (ps-restore ps saved) +fail+)
+                     (make-node 'clython.ast:match-value-node
+                                :value (make-node 'clython.ast:unary-op-node
+                                                  :op :u-sub :operand expr
+                                                  :line (tok-line tok) :col (tok-col tok))
+                                :line (tok-line tok) :col (tok-col tok))))
+               (progn (ps-restore ps saved) +fail+)))))
+      ;; Number or string literal
       ((or (eq (tok-type tok) :number) (eq (tok-type tok) :string) (eq (tok-type tok) :fstring))
        (let ((expr (parse-atom ps)))
          (if (failp expr) +fail+
@@ -2564,31 +2619,16 @@
       ((and tok (eq (tok-type tok) :name))
        (let ((expr (parse-primary ps)))
          (if (failp expr) +fail+
-             ;; Check for 'as' binding
-             (let ((as-tok (ps-token ps)))
-               (if (and as-tok (eq (tok-type as-tok) :keyword) (string= (tok-value as-tok) "as"))
-                   (progn
-                     (ps-advance ps)
-                     (let ((name-tok (ps-token ps)))
-                       (if (and name-tok (eq (tok-type name-tok) :name))
-                           (progn
-                             (ps-advance ps)
-                             (make-node 'clython.ast:match-as-node
-                                        :pattern (make-node 'clython.ast:match-value-node :value expr)
-                                        :name (tok-value name-tok)
-                                        :line (clython.ast:node-line expr)
-                                        :col (clython.ast:node-col expr)))
-                           +fail+)))
-                   ;; Simple name -> capture if not dotted, value if dotted
-                   (if (typep expr 'clython.ast:name-node)
-                       (make-node 'clython.ast:match-as-node
-                                  :pattern nil
-                                  :name (clython.ast:name-node-id expr)
-                                  :line (clython.ast:node-line expr)
-                                  :col (clython.ast:node-col expr))
-                       (make-node 'clython.ast:match-value-node :value expr
-                                  :line (clython.ast:node-line expr)
-                                  :col (clython.ast:node-col expr))))))))
+             ;; Simple name -> capture if not dotted, value if dotted
+             (if (typep expr 'clython.ast:name-node)
+                 (make-node 'clython.ast:match-as-node
+                            :pattern nil
+                            :name (clython.ast:name-node-id expr)
+                            :line (clython.ast:node-line expr)
+                            :col (clython.ast:node-col expr))
+                 (make-node 'clython.ast:match-value-node :value expr
+                            :line (clython.ast:node-line expr)
+                            :col (clython.ast:node-col expr))))))
       ;; [ ] sequence pattern
       ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "["))
        (ps-advance ps)
@@ -2598,7 +2638,7 @@
              (when (and close (eq (tok-type close) :op) (string= (tok-value close) "]"))
                (ps-advance ps)
                (return)))
-           (let ((p (parse-match-pattern ps)))
+           (let ((p (parse-match-or-pattern ps)))
              (when (failp p) (return))
              (push p patterns))
            (let ((comma (ps-token ps)))
@@ -2607,17 +2647,53 @@
          (make-node 'clython.ast:match-sequence-node
                     :patterns (nreverse patterns)
                     :line (tok-line tok) :col (tok-col tok))))
-      ;; ( ) grouped or sequence pattern
+      ;; ( ) grouped or sequence pattern (tuple)
       ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "("))
        (ps-advance ps)
-       (let ((inner (parse-match-pattern ps)))
-         (when (failp inner)
-           (return-from nil +fail+))
-         (let ((close (ps-token ps)))
-           (if (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
-               (progn (ps-advance ps) inner)
-               +fail+))))
+       ;; Check for empty tuple ()
+       (let ((close-tok (ps-token ps)))
+         (when (and close-tok (eq (tok-type close-tok) :op) (string= (tok-value close-tok) ")"))
+           (ps-advance ps)
+           (return-from nil
+             (make-node 'clython.ast:match-sequence-node
+                        :patterns nil
+                        :line (tok-line tok) :col (tok-col tok)))))
+       (let ((first (parse-match-or-pattern ps)))
+         (when (failp first) (return-from nil +fail+))
+         ;; Check if comma follows -> sequence pattern
+         (let ((comma-tok (ps-token ps)))
+           (if (and comma-tok (eq (tok-type comma-tok) :op) (string= (tok-value comma-tok) ","))
+               ;; It's a sequence pattern (tuple)
+               (let ((patterns (list first)))
+                 (loop
+                   (let ((c (ps-token ps)))
+                     (unless (and c (eq (tok-type c) :op) (string= (tok-value c) ","))
+                       (return))
+                     (ps-advance ps)
+                     ;; Check for trailing comma before )
+                     (let ((close (ps-token ps)))
+                       (when (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
+                         (return)))
+                     (let ((p (parse-match-or-pattern ps)))
+                       (when (failp p) (return))
+                       (push p patterns))))
+                 (let ((close (ps-token ps)))
+                   (if (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
+                       (progn (ps-advance ps)
+                              (make-node 'clython.ast:match-sequence-node
+                                         :patterns (nreverse patterns)
+                                         :line (tok-line tok) :col (tok-col tok)))
+                       +fail+)))
+               ;; Single element in parens -> group, not sequence
+               (let ((close (ps-token ps)))
+                 (if (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
+                     (progn (ps-advance ps) first)
+                     +fail+))))))
       (t +fail+))))
+
+(defrule parse-match-pattern
+  ;; Top-level entry point for pattern parsing
+  (parse-match-or-pattern ps))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Section 6: Top-level Statement and Module

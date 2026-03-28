@@ -1112,6 +1112,141 @@
   clython.runtime:+py-none+)
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; Match statement (PEP 634)
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %match-pattern (subject pattern env)
+  "Try to match SUBJECT (a py-object) against PATTERN (an AST pattern node).
+   Returns T if matched, NIL otherwise. On match, binds captured names in ENV."
+  (typecase pattern
+    ;; Wildcard or capture: match-as-node with pattern=NIL
+    (clython.ast:match-as-node
+     (let ((inner (clython.ast:match-as-node-pattern pattern))
+           (name  (clython.ast:match-as-node-name pattern)))
+       (cond
+         ;; Wildcard: pattern=NIL, name=NIL  -> always matches, no binding
+         ((and (null inner) (null name)) t)
+         ;; Capture: pattern=NIL, name set   -> always matches, bind name
+         ((null inner)
+          (clython.scope:env-set name subject env)
+          t)
+         ;; As-pattern: pattern + name -> match inner, then bind
+         (t (when (%match-pattern subject inner env)
+              (when name (clython.scope:env-set name subject env))
+              t)))))
+
+    ;; Literal value comparison
+    (clython.ast:match-value-node
+     (let ((val (eval-node (clython.ast:match-value-node-value pattern) env)))
+       (clython.runtime:py-eq subject val)))
+
+    ;; Singleton: True, False, None
+    (clython.ast:match-singleton-node
+     (let ((sv (clython.ast:match-singleton-node-value pattern)))
+       (cond
+         ((eq sv t)    (eq subject clython.runtime:+py-true+))
+         ((eq sv nil)  (eq subject clython.runtime:+py-false+))
+         ((eq sv :none) (eq subject clython.runtime:+py-none+))
+         (t nil))))
+
+    ;; Sequence pattern: (x, y) or [a, b, c]
+    (clython.ast:match-sequence-node
+     (let ((sub-patterns (clython.ast:match-sequence-node-patterns pattern)))
+       ;; Subject must be a tuple or list
+       (let ((elems nil))
+         (cond
+           ((typep subject 'clython.runtime:py-tuple)
+            (setf elems (coerce (clython.runtime:py-tuple-value subject) 'list)))
+           ((typep subject 'clython.runtime:py-list)
+            (setf elems (coerce (clython.runtime:py-list-value subject) 'list)))
+           (t (return-from %match-pattern nil)))
+         ;; Check for star patterns
+         (let ((star-idx nil))
+           (loop for i from 0 below (length sub-patterns)
+                 when (typep (nth i sub-patterns) 'clython.ast:match-star-node)
+                   do (setf star-idx i) (return))
+           (if star-idx
+               ;; Star pattern present
+               (let* ((before-count star-idx)
+                      (after-count (- (length sub-patterns) star-idx 1)))
+                 (unless (>= (length elems) (+ before-count after-count))
+                   (return-from %match-pattern nil))
+                 ;; Match before star
+                 (loop for i below before-count
+                       unless (%match-pattern (nth i elems) (nth i sub-patterns) env)
+                         do (return-from %match-pattern nil))
+                 ;; Bind star
+                 (let* ((star-pat (nth star-idx sub-patterns))
+                        (star-name (clython.ast:match-star-node-name star-pat))
+                        (star-elems (subseq elems before-count
+                                            (- (length elems) after-count))))
+                   (when star-name
+                     (clython.scope:env-set star-name
+                                            (clython.runtime:make-py-list star-elems)
+                                            env)))
+                 ;; Match after star
+                 (loop for i from 1 to after-count
+                       for pat = (nth (+ star-idx i) sub-patterns)
+                       for elem = (nth (- (length elems) after-count (- i)) elems)
+                       unless (%match-pattern elem pat env)
+                         do (return-from %match-pattern nil))
+                 t)
+               ;; No star — exact length match
+               (and (= (length elems) (length sub-patterns))
+                    (loop for elem in elems
+                          for pat in sub-patterns
+                          always (%match-pattern elem pat env))))))))
+
+    ;; OR pattern: 1 | 2 | 3
+    (clython.ast:match-or-node
+     (loop for alt in (clython.ast:match-or-node-patterns pattern)
+           thereis (%match-pattern subject alt env)))
+
+    ;; Star pattern (handled inside sequence, but just in case)
+    (clython.ast:match-star-node
+     ;; Should not be reached outside of sequence context
+     nil)
+
+    ;; Mapping pattern: {"key": value}
+    (clython.ast:match-mapping-node
+     ;; Subject must be a dict
+     (when (typep subject 'clython.runtime:py-dict)
+       (let ((keys (clython.ast:match-mapping-node-keys pattern))
+             (pats (clython.ast:match-mapping-node-patterns pattern))
+             (ht   (clython.runtime:py-dict-value subject)))
+         (loop for key-node in keys
+               for pat in pats
+               for key-val = (eval-node key-node env)
+               always (multiple-value-bind (val found)
+                          (gethash (clython.runtime::dict-hash-key key-val) ht)
+                        (and found (%match-pattern val pat env)))))))
+
+    ;; Class pattern (not yet fully supported)
+    (clython.ast:match-class-node nil)
+
+    (t nil)))
+
+(defmethod eval-node ((node clython.ast:match-node) env)
+  (let ((subject (eval-node (clython.ast:match-node-subject node) env)))
+    (dolist (case-obj (clython.ast:match-node-cases node) clython.runtime:+py-none+)
+      (let ((pattern (clython.ast:match-case-pattern case-obj))
+            (guard   (clython.ast:match-case-guard case-obj))
+            (body    (clython.ast:match-case-body case-obj)))
+        ;; Try matching — use a fresh scope so failed matches don't leak bindings
+        (let ((matched nil))
+          ;; We need to test if pattern matches first, then check guard
+          (when (%match-pattern subject pattern env)
+            (if guard
+                (when (clython.runtime:py-bool-val (eval-node guard env))
+                  (setf matched t))
+                (setf matched t)))
+          (when matched
+            (let ((result clython.runtime:+py-none+))
+              (dolist (stmt body)
+                (setf result (eval-node stmt env)))
+              (return result))))))))
+
+;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Wire up import system callback
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
