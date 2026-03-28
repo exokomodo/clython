@@ -414,6 +414,30 @@
 (defgeneric py-str-of (obj)
   (:documentation "Return a CL string — Python __str__."))
 
+(defmethod py-repr ((obj py-object))
+  "Default: check for __repr__ in class dict, else generic."
+  (let ((cls (py-object-class obj)))
+    (when (typep cls 'py-type)
+      (let ((tdict (py-type-dict cls)))
+        (when tdict
+          (multiple-value-bind (repr-fn found) (gethash "__repr__" tdict)
+            (when found
+              (return-from py-repr (py-str-value (py-call repr-fn obj)))))))))
+  (format nil "<~A object>"
+          (let ((cls (py-object-class obj)))
+            (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))))
+
+(defmethod py-str-of ((obj py-object))
+  "Default: check for __str__ in class dict, else use __repr__."
+  (let ((cls (py-object-class obj)))
+    (when (typep cls 'py-type)
+      (let ((tdict (py-type-dict cls)))
+        (when tdict
+          (multiple-value-bind (str-fn found) (gethash "__str__" tdict)
+            (when found
+              (return-from py-str-of (py-str-value (py-call str-fn obj)))))))))
+  (py-repr obj))
+
 (defmethod py-repr ((obj py-none))   "None")
 (defmethod py-str-of ((obj py-none)) "None")
 
@@ -1147,15 +1171,36 @@
   ;; Built-in attributes for type objects
   (cond
     ((string= name "__name__") (make-py-str (py-type-name obj)))
-    (t (call-next-method))))
+    (t
+     ;; Check the type's own dict (class attributes)
+     (let ((tdict (py-type-dict obj)))
+       (when tdict
+         (multiple-value-bind (val found) (gethash name tdict)
+           (when found (return-from py-getattr val)))))
+     (call-next-method))))
 
 (defmethod py-getattr ((obj py-object) (name string))
+  ;; 1. Check instance dict
   (let ((d (py-object-dict obj)))
     (when (hash-table-p d)
       (multiple-value-bind (val found) (gethash name d)
         (when found (return-from py-getattr val)))))
+  ;; 2. Check class dict (for methods and class attributes)
+  (let ((cls (py-object-class obj)))
+    (when (typep cls 'py-type)
+      (let ((tdict (py-type-dict cls)))
+        (when tdict
+          (multiple-value-bind (val found) (gethash name tdict)
+            (when found
+              ;; If it's a function, return a bound method
+              (if (typep val 'py-function)
+                  (return-from py-getattr
+                    (make-instance 'py-method :function val :self obj))
+                  (return-from py-getattr val))))))))
   (py-raise "AttributeError" "'~A' object has no attribute '~A'"
-            (class-name (class-of obj)) name))
+            (let ((cls (py-object-class obj)))
+              (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))
+            name))
 
 (defmethod py-setattr ((obj py-object) (name string) value)
   (unless (hash-table-p (py-object-dict obj))
@@ -1445,6 +1490,17 @@
 
 (defmethod py-call ((obj py-method) &rest args)
   (apply #'py-call (py-method-function obj) (py-method-self obj) args))
+
+(defmethod py-call ((cls py-type) &rest args)
+  "Instantiate a class: create an instance, then call __init__ if defined."
+  (let* ((instance (make-instance 'py-object
+                                  :py-class cls
+                                  :py-dict (make-hash-table :test #'equal)))
+         (init-fn (let ((tdict (py-type-dict cls)))
+                    (when tdict (gethash "__init__" tdict)))))
+    (when init-fn
+      (apply #'py-call init-fn instance args))
+    instance))
 
 ;;; __contains__ -----------------------------------------------------------
 

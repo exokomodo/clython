@@ -314,6 +314,19 @@
         (let ((clython.runtime:*current-kwargs* kwargs))
           (apply #'clython.runtime:py-call func args)))))
 
+(defun %call-user-function-from-cl-fn (params body closure-env args)
+  "Called from the cl-fn closure installed on user-defined functions.
+   This allows py-call to work for decorators, callbacks, etc."
+  (let ((call-env (clython.scope:env-extend closure-env)))
+    (%bind-params params args call-env clython.runtime:*current-kwargs*)
+    (handler-case
+        (progn
+          (dolist (stmt body)
+            (eval-node stmt call-env))
+          clython.runtime:+py-none+)
+      (py-return-value (ret)
+        (py-return-value-val ret)))))
+
 (defun %call-user-function (func args &optional kwargs)
   "Call a user-defined py-function with the given evaluated arguments."
   (let* ((closure-env (clython.runtime:py-function-env func))
@@ -693,7 +706,12 @@
                 :name name
                 :params evaled-params
                 :body body
-                :env env)))
+                :env env
+                :cl-fn (lambda (&rest args)
+                         ;; This closure makes py-call work for user-defined functions
+                         ;; (needed for decorators, first-class function passing via py-call)
+                         (%call-user-function-from-cl-fn
+                          evaled-params body env args)))))
     ;; Apply decorators (in reverse order)
     (let ((decorated func))
       (dolist (dec-node (reverse (clython.ast:function-def-node-decorator-list node)))
