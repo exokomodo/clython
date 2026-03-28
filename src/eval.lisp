@@ -1752,11 +1752,17 @@
 ;;; ─── Type alias (stub) ─────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:type-alias-node) env)
-  ;; Simple type alias — bind `name` to value in env
-  (let ((name (clython.ast:type-alias-node-name node))
-        (value (eval-node (clython.ast:type-alias-node-value node) env)))
-    (clython.scope:env-set name value env)
-    clython.runtime:+py-none+))
+  ;; PEP 695 type alias — bind type params as TypeVar stubs, eval value, bind name
+  (let* ((name (clython.ast:type-alias-node-name node))
+         (type-params (clython.ast:type-alias-node-type-params node))
+         ;; Create a child scope so type param bindings don't leak
+         (inner-env (clython.scope:env-extend env)))
+    ;; Bind each type param as a string placeholder (acts as a TypeVar name)
+    (dolist (tp type-params)
+      (clython.scope:env-set tp (clython.runtime:make-py-str tp) inner-env))
+    (let ((value (eval-node (clython.ast:type-alias-node-value node) inner-env)))
+      (clython.scope:env-set name value env)
+      clython.runtime:+py-none+)))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Match statement (PEP 634)

@@ -1009,17 +1009,14 @@ class TestSection713NonlocalStatementExtended:
 class TestSection714TypeStatement:
     """Type statement tests (Python 3.12+) from AST conformance suite."""
 
-    @pytest.mark.xfail(reason="type statement (PEP 695) may not be implemented")
     def test_simple_type_alias(self):
         out, _, rc = clython_run("type Point = tuple[int, int]\nprint(Point)")
         assert rc == 0
 
-    @pytest.mark.xfail(reason="type statement (PEP 695) may not be implemented")
     def test_generic_type_alias(self):
         out, _, rc = clython_run("type Vector[T] = list[T]\nprint(Vector)")
         assert rc == 0
 
-    @pytest.mark.xfail(reason="type statement (PEP 695) may not be implemented")
     def test_type_alias_usage(self):
         out, _, rc = clython_run(
             "type IntList = list[int]\nx: IntList = [1, 2, 3]\nprint(x)"

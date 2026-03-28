@@ -1584,27 +1584,43 @@
 ;;; --- Named expression (:=) ---
 
 (defrule parse-type-stmt
+  ;; type <name>[<params>] = <expr>  (PEP 695 soft keyword)
   (let ((tok (ps-token ps)))
-    (if (and tok (eq (tok-type tok) :type))
-        (progn
+    (if (and tok (eq (tok-type tok) :name) (string= (tok-value tok) "type"))
+        (let ((saved (ps-save ps)))
           (ps-advance ps) ;; consume `type`
-          ;; Parse name
-          (let* ((name-tok (ps-token ps))
-                 (name (and name-tok (tok-value name-tok))))
-            (when name-tok
-              (ps-advance ps) ;; consume name
-              ;; Check for =
-              (let ((assign-tok (ps-token ps)))
-                (when (and assign-tok
-                           (eq (tok-type assign-tok) :op)
-                           (string= (tok-value assign-tok) "="))
-                  (ps-advance ps) ;; consume =
-                  (let ((value (parse-expression ps)))
-                    (if (failp value)
-                        +fail+
-                        (make-node 'clython.ast:type-alias-node
-                                   :name name
-                                   :value value))))))))
+          (let ((name-tok (ps-token ps)))
+            (if (and name-tok (eq (tok-type name-tok) :name))
+                (let ((name (tok-value name-tok)))
+                  (ps-advance ps)
+                  ;; Collect optional type params [T, ...]
+                  (let ((type-params '()))
+                    (let ((mb (ps-token ps)))
+                      (when (and mb (eq (tok-type mb) :op) (string= (tok-value mb) "["))
+                        (ps-advance ps) ;; consume [
+                        (loop
+                          (let ((tp (ps-token ps)))
+                            (when (or (null tp)
+                                      (and (eq (tok-type tp) :op) (string= (tok-value tp) "]")))
+                              (when tp (ps-advance ps)) ;; consume ]
+                              (return))
+                            (when (eq (tok-type tp) :name)
+                              (push (tok-value tp) type-params))
+                            (ps-advance ps)))))
+                    ;; Expect =
+                    (let ((eq-tok (ps-token ps)))
+                      (if (and eq-tok (eq (tok-type eq-tok) :op) (string= (tok-value eq-tok) "="))
+                          (progn
+                            (ps-advance ps)
+                            (let ((value (parse-expression-internal ps)))
+                              (if (failp value)
+                                  (progn (ps-restore ps saved) +fail+)
+                                  (make-node 'clython.ast:type-alias-node
+                                             :name name
+                                             :type-params (nreverse type-params)
+                                             :value value))))
+                          (progn (ps-restore ps saved) +fail+)))))
+                (progn (ps-restore ps saved) +fail+))))
         +fail+)))
 
 (defrule parse-named-expr

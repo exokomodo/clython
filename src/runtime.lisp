@@ -2526,6 +2526,19 @@
                 (not (and (typep result 'py-int) (zerop (py-int-value result)))))
               t)))))
 
+;; Type subscript for generic aliases: list[int], dict[str, int], etc.
+;; Returns a string-based stub — enough for PEP 695 type aliases.
+(defmethod py-getitem ((obj py-type) key)
+  (let* ((type-name (py-type-name obj))
+         (key-repr (py-repr key)))
+    (make-py-str (format nil "~A[~A]" type-name key-repr))))
+
+(defmethod py-getitem ((obj py-function) key)
+  ;; Builtin functions used as type constructors (list, dict, etc.)
+  (let* ((fn-name (py-function-name obj))
+         (key-repr (py-repr key)))
+    (make-py-str (format nil "~A[~A]" fn-name key-repr))))
+
 (defmethod py-getitem ((obj py-object) key)
   (let ((fn (%lookup-dunder obj "__getitem__")))
     (if fn (py-call fn obj key)
