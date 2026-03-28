@@ -372,11 +372,54 @@
 (defmethod py-str-of ((obj py-int))
   (py-repr obj))
 
+(defun format-py-float (v)
+  "Format a double-float the way Python's repr() does."
+  (cond
+    ;; Special cases
+    ((zerop v) (if (minusp (float-sign v)) "-0.0" "0.0"))
+    ;; Integers that fit: 3.0, -1.0, etc.
+    ((and (= v (floor v)) (< (abs v) 1.0d16))
+     (format nil "~,1f" v))
+    ;; Small numbers that don't need scientific notation
+    ;; Python uses fixed notation when 1e-4 <= |v| < 1e16
+    ((and (>= (abs v) 1.0d-4) (< (abs v) 1.0d16))
+     ;; Use ~F and strip trailing zeros (keep at least one decimal digit)
+     (let* ((s (format nil "~,17f" v))
+            ;; Strip trailing zeros after decimal point
+            (dot-pos (position #\. s)))
+       (when dot-pos
+         (let ((end (length s)))
+           (loop while (and (> end (+ dot-pos 2))
+                            (char= (char s (1- end)) #\0))
+                 do (decf end))
+           (setf s (subseq s 0 end))))
+       s))
+    ;; Scientific notation for very large or very small numbers
+    (t
+     (let* ((exp (floor (log (abs v) 10)))
+            (mantissa (/ v (expt 10.0d0 exp)))
+            ;; Format mantissa, strip trailing zeros
+            (m-str (format nil "~,17f" mantissa))
+            (dot-pos (position #\. m-str)))
+       (when dot-pos
+         (let ((end (length m-str)))
+           (loop while (and (> end (+ dot-pos 2))
+                            (char= (char m-str (1- end)) #\0))
+                 do (decf end))
+           (setf m-str (subseq m-str 0 end)))
+         ;; If mantissa ends with ".0", strip to just the integer part
+         ;; Python: 1e+16 not 1.0e+16
+         (when (and (>= (length m-str) 2)
+                    (string= (subseq m-str (- (length m-str) 2)) ".0"))
+           ;; But only strip if it's exactly X.0 (not X.50 etc.)
+           (setf m-str (subseq m-str 0 (- (length m-str) 2)))))
+       (format nil "~Ae~:[+~;-~]~2,'0d"
+               m-str
+               (< exp 0)
+               (abs exp))))))
+
 (defmethod py-repr ((obj py-float))
-  (let ((v (py-float-value obj)))
-    (if (and (= v (floor v)) (< (abs v) 1.0d15))
-        (format nil "~,1f" v)
-        (format nil "~G" v))))
+  (format-py-float (py-float-value obj)))
 (defmethod py-str-of ((obj py-float))
   (py-repr obj))
 
