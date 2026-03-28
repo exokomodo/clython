@@ -27,6 +27,7 @@
    #:+builtin-tuple+
    #:+builtin-dict+
    #:+builtin-set+
+   #:+builtin-frozenset+
    #:+builtin-abs+
    #:+builtin-min+
    #:+builtin-max+
@@ -130,7 +131,7 @@
            (make-py-int
             (parse-integer (py-str-value obj)
                            :radix (if base (py-int-value base) 10))))
-          (t (error "TypeError: int() argument must be a string, a bytes-like object or a real number, not '~A'"
+          (t (clython.runtime:py-raise "TypeError" "int() argument must be a string, a bytes-like object or a real number, not '~A'"
                     (py-type-of obj)))))))
 
 (defbuiltin +builtin-float+ "float" (&rest args)
@@ -143,7 +144,7 @@
           ((typep obj 'py-bool)  (make-py-float (if (py-bool-raw obj) 1.0d0 0.0d0)))
           ((typep obj 'py-str)
            (make-py-float (float (read-from-string (py-str-value obj)) 1.0d0)))
-          (t (error "TypeError: float() argument must be a string or a real number, not '~A'"
+          (t (clython.runtime:py-raise "TypeError" "float() argument must be a string or a real number, not '~A'"
                     (py-type-of obj)))))))
 
 (defbuiltin +builtin-bool+ "bool" (&rest args)
@@ -212,7 +213,7 @@
      (make-py-range (py-int-value (first args))
                     (py-int-value (second args))
                     (py-int-value (third args))))
-    (t (error "TypeError: range expected 1-3 arguments, got ~D" (length args)))))
+    (t (clython.runtime:py-raise "TypeError" "range expected 1-3 arguments, got ~D" (length args)))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; list / tuple / dict / set
@@ -245,6 +246,11 @@
       (make-py-set)
       (make-py-set (collect-iter (first args)))))
 
+(defbuiltin +builtin-frozenset+ "frozenset" (&rest args)
+  (if (null args)
+      (make-py-frozenset)
+      (make-py-frozenset (collect-iter (first args)))))
+
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; abs / min / max / sum
 ;;;; ─────────────────────────────────────────────────────────────────────────
@@ -259,7 +265,7 @@
                    (collect-iter (first args))
                    args)))
     (when (null items)
-      (error "ValueError: min() arg is an empty sequence"))
+      (clython.runtime:py-raise "ValueError" "min() arg is an empty sequence"))
     (reduce (lambda (a b) (if (py-lt a b) a b)) items)))
 
 (defbuiltin +builtin-max+ "max" (&rest args)
@@ -269,7 +275,7 @@
                    (collect-iter (first args))
                    args)))
     (when (null items)
-      (error "ValueError: max() arg is an empty sequence"))
+      (clython.runtime:py-raise "ValueError" "max() arg is an empty sequence"))
     (reduce (lambda (a b) (if (py-gt a b) a b)) items)))
 
 (defbuiltin +builtin-sum+ "sum" (&rest args)
@@ -319,7 +325,7 @@
 (defbuiltin +builtin-ord+ "ord" (obj)
   (let ((s (py-str-value obj)))
     (unless (= (length s) 1)
-      (error "TypeError: ord() expected a character, but string of length ~D found"
+      (clython.runtime:py-raise "TypeError" "ord() expected a character, but string of length ~D found"
              (length s)))
     (make-py-int (char-code (char s 0)))))
 
@@ -446,7 +452,7 @@
       (error ()
         (if default
             default
-            (error "AttributeError: object has no attribute '~A'" name))))))
+            (clython.runtime:py-raise "AttributeError" "object has no attribute '~A'" name))))))
 
 (defbuiltin +builtin-setattr+ "setattr" (obj name value)
   (py-setattr obj (py-str-value name) value)
@@ -486,6 +492,7 @@
                (cons "tuple"        +builtin-tuple+)
                (cons "dict"         +builtin-dict+)
                (cons "set"          +builtin-set+)
+               (cons "frozenset"    +builtin-frozenset+)
                (cons "abs"          +builtin-abs+)
                (cons "min"          +builtin-min+)
                (cons "max"          +builtin-max+)
