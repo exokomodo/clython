@@ -60,6 +60,7 @@
     (setf (gethash "True"  (env-bindings env)) clython.runtime:+py-true+)
     (setf (gethash "False" (env-bindings env)) clython.runtime:+py-false+)
     (setf (gethash "None"  (env-bindings env)) clython.runtime:+py-none+)
+    (setf (gethash "__name__" (env-bindings env)) (clython.runtime:make-py-str "__main__"))
     env))
 
 (defun env-extend (parent)
