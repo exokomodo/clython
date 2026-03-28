@@ -1269,9 +1269,127 @@
             (mapcar #'clython.runtime:py-str-of parts)))))
 
 (defmethod eval-node ((node clython.ast:formatted-value-node) env)
-  (let ((val (eval-node (clython.ast:formatted-value-node-value node) env)))
-    ;; Simplified: just convert to string (ignoring conversion/format-spec)
-    (clython.runtime:make-py-str (clython.runtime:py-str-of val))))
+  (let* ((val (eval-node (clython.ast:formatted-value-node-value node) env))
+         (conv (clython.ast:formatted-value-node-conversion node))
+         (fmt-spec-node (clython.ast:formatted-value-node-format-spec node))
+         (converted
+           (cond
+             ((eql conv 115) (clython.runtime:py-str-of val))   ; !s
+             ((eql conv 114) (clython.runtime:py-repr val))     ; !r
+             ((eql conv 97)  (clython.runtime:py-repr val))     ; !a
+             (t nil)))
+         (fmt-spec
+           (when fmt-spec-node
+             (clython.runtime:py-str-value (eval-node fmt-spec-node env)))))
+    (if (and fmt-spec (plusp (length fmt-spec)))
+        (clython.runtime:make-py-str (apply-python-format-spec val fmt-spec converted))
+        (clython.runtime:make-py-str (or converted (clython.runtime:py-str-of val))))))
+
+(defun apply-python-format-spec (val spec &optional converted-str)
+  "Apply a Python format spec string to a value, returning a formatted string."
+  (let* ((len (length spec))
+         (pos 0)
+         (fill-char #\Space)
+         (align nil)
+         (zero-pad nil)
+         (width nil)
+         (precision nil)
+         (type-char nil))
+    ;; Parse fill+align or just align
+    (when (and (>= len 2)
+               (member (char spec 1) '(#\< #\> #\^ #\=)))
+      (setf fill-char (char spec 0)
+            align (char spec 1)
+            pos 2))
+    (when (and (null align) (plusp len)
+               (member (char spec 0) '(#\< #\> #\^ #\=)))
+      (setf align (char spec 0)
+            pos 1))
+    ;; Sign
+    (when (and (< pos len) (member (char spec pos) '(#\+ #\- #\Space)))
+      (incf pos))
+    ;; Zero padding
+    (when (and (< pos len) (char= (char spec pos) #\0))
+      (setf zero-pad t)
+      (when (null align) (setf align #\=))
+      (when (char= fill-char #\Space) (setf fill-char #\0))
+      (incf pos))
+    ;; Width
+    (let ((start pos))
+      (loop while (and (< pos len) (digit-char-p (char spec pos))) do (incf pos))
+      (when (> pos start)
+        (setf width (parse-integer (subseq spec start pos)))))
+    ;; Precision
+    (when (and (< pos len) (char= (char spec pos) #\.))
+      (incf pos)
+      (let ((start pos))
+        (loop while (and (< pos len) (digit-char-p (char spec pos))) do (incf pos))
+        (when (> pos start)
+          (setf precision (parse-integer (subseq spec start pos))))))
+    ;; Type character
+    (when (< pos len)
+      (setf type-char (char spec pos)))
+    ;; Format the value
+    (let* ((num-val (typecase val
+                      (clython.runtime:py-int (clython.runtime:py-int-value val))
+                      (clython.runtime:py-float (clython.runtime:py-float-value val))
+                      (t nil)))
+           (raw
+             (cond
+               ((and converted-str (null type-char)) converted-str)
+               ((and type-char (char= type-char #\d))
+                (format nil "~D" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\x))
+                (format nil "~(~X~)" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\X))
+                (format nil "~X" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\o))
+                (format nil "~O" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\b))
+                (format nil "~B" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\f))
+                (let ((p (or precision 6))
+                      (n (if num-val (float num-val 1.0d0) 0.0d0)))
+                  (format nil "~,vF" p n)))
+               ((and type-char (char= type-char #\e))
+                (let ((p (or precision 6))
+                      (n (if num-val (float num-val 1.0d0) 0.0d0)))
+                  (format nil "~,vE" p n)))
+               ((and type-char (char= type-char #\s))
+                (let ((s (or converted-str (clython.runtime:py-str-of val))))
+                  (if precision (subseq s 0 (min precision (length s))) s)))
+               (t
+                (cond
+                  ((and precision num-val)
+                   (format nil "~,vF" precision (float num-val 1.0d0)))
+                  (converted-str converted-str)
+                  (t (clython.runtime:py-str-of val)))))))
+      ;; Apply width/alignment
+      (if (and width (> width (length raw)))
+          (let ((pad-amount (- width (length raw)))
+                (effective-align (or align (if num-val #\> #\<))))
+            (cond
+              ((char= effective-align #\<)
+               (concatenate 'string raw (make-string pad-amount :initial-element fill-char)))
+              ((char= effective-align #\>)
+               (concatenate 'string (make-string pad-amount :initial-element fill-char) raw))
+              ((char= effective-align #\^)
+               (let ((left (floor pad-amount 2))
+                     (right (ceiling pad-amount 2)))
+                 (concatenate 'string
+                              (make-string left :initial-element fill-char)
+                              raw
+                              (make-string right :initial-element fill-char))))
+              ((char= effective-align #\=)
+               (if (and (plusp (length raw))
+                        (member (char raw 0) '(#\+ #\- #\Space)))
+                   (concatenate 'string
+                                (string (char raw 0))
+                                (make-string pad-amount :initial-element fill-char)
+                                (subseq raw 1))
+                   (concatenate 'string (make-string pad-amount :initial-element fill-char) raw)))
+              (t raw)))
+          raw))))
 
 ;;; ─── Type alias (stub) ─────────────────────────────────────────────────────
 

@@ -433,20 +433,71 @@
       (flush-text))
     (nreverse parts)))
 
+(defun %split-fstring-expr-parts (source)
+  "Split f-string expression into (expr-src conversion format-spec).
+   Returns (values expr-string conversion-int-or-nil format-spec-string-or-nil)."
+  (let ((len (length source))
+        (i 0)
+        (depth 0))
+    (loop while (< i len) do
+      (let ((ch (char source i)))
+        (case ch
+          ((#\( #\[ #\{) (incf depth) (incf i))
+          ((#\) #\] #\}) (decf depth) (incf i))
+          ((#\' #\")
+           (let ((quote ch))
+             (incf i)
+             (loop while (and (< i len) (not (char= (char source i) quote))) do
+               (when (char= (char source i) #\\) (incf i))
+               (incf i))
+             (when (< i len) (incf i))))
+          (#\!
+           (when (and (zerop depth)
+                      (< (1+ i) len)
+                      (member (char source (1+ i)) '(#\s #\r #\a)))
+             (let ((next-after (+ i 2)))
+               (when (or (>= next-after len)
+                         (char= (char source next-after) #\:))
+                 (let* ((expr-src (subseq source 0 i))
+                        (conv-int (char-code (char source (1+ i))))
+                        (fmt-spec (when (and (< next-after len)
+                                             (char= (char source next-after) #\:))
+                                    (subseq source (1+ next-after)))))
+                   (return-from %split-fstring-expr-parts
+                     (values expr-src conv-int fmt-spec))))))
+           (incf i))
+          (#\:
+           (when (zerop depth)
+             (return-from %split-fstring-expr-parts
+               (values (subseq source 0 i) nil (subseq source (1+ i)))))
+           (incf i))
+          (t (incf i)))))
+    (values source nil nil)))
+
 (defun %parse-fstring-expr (source line col)
   "Parse an f-string expression source into a formatted-value-node."
   (handler-case
-      (let* ((tokens (clython.lexer:tokenize source))
-             (ps (make-parser-state tokens))
-             (expr (parse-expression-internal ps)))
-        (if (failp expr)
-            ;; Fallback: treat as literal
-            (make-instance 'clython.ast:constant-node
-                           :value (format nil "'~A'" source)
-                           :line line :col col)
-            (make-instance 'clython.ast:formatted-value-node
-                           :value expr
-                           :line line :col col)))
+      (multiple-value-bind (expr-src conversion fmt-spec)
+          (%split-fstring-expr-parts source)
+        (let* ((tokens (clython.lexer:tokenize expr-src))
+               (ps (make-parser-state tokens))
+               (expr (parse-expression-internal ps))
+               (fmt-spec-node
+                 (when fmt-spec
+                   (make-instance 'clython.ast:joined-str-node
+                                  :values (list (make-instance 'clython.ast:constant-node
+                                                               :value (format nil "'~A'" fmt-spec)
+                                                               :line line :col col))
+                                  :line line :col col))))
+          (if (failp expr)
+              (make-instance 'clython.ast:constant-node
+                             :value (format nil "'~A'" source)
+                             :line line :col col)
+              (make-instance 'clython.ast:formatted-value-node
+                             :value expr
+                             :conversion conversion
+                             :format-spec fmt-spec-node
+                             :line line :col col))))
     (error ()
       (make-instance 'clython.ast:constant-node
                      :value (format nil "'~A'" source)
