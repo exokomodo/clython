@@ -310,8 +310,19 @@
           (return-from eval-node
             (make-instance 'clython.runtime:py-super :type cls :obj self))))))
   (let* ((func (eval-node (clython.ast:call-node-func node) env))
-         (args (mapcar (lambda (a) (eval-node a env))
-                       (clython.ast:call-node-args node)))
+         (args (loop for a in (clython.ast:call-node-args node)
+                     if (typep a 'clython.ast:starred-node)
+                       ;; Star unpacking: *args → splice the iterable into the arg list
+                       append (let ((val (eval-node (clython.ast:starred-node-value a) env)))
+                                (coerce (cond
+                                          ((typep val 'clython.runtime:py-list)
+                                           (clython.runtime:py-list-value val))
+                                          ((typep val 'clython.runtime:py-tuple)
+                                           (clython.runtime:py-tuple-value val))
+                                          (t (error "Cannot unpack ~A" val)))
+                                        'list))
+                     else
+                       collect (eval-node a env)))
          (kw-nodes (clython.ast:call-node-keywords node))
          ;; Evaluate keyword arguments into an alist ((name . value) ...)
          (kwargs (mapcar (lambda (kw)
@@ -531,13 +542,17 @@
 ;;; ─── Lambda ───────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:lambda-node) env)
-  (let ((evaled-params (%eval-defaults (clython.ast:lambda-node-args node) env)))
+  (let* ((evaled-params (%eval-defaults (clython.ast:lambda-node-args node) env))
+         (body (list (make-instance 'clython.ast:return-node
+                                    :value (clython.ast:lambda-node-body node)))))
     (clython.runtime:make-py-function
      :name "<lambda>"
      :params evaled-params
-     :body (list (make-instance 'clython.ast:return-node
-                                :value (clython.ast:lambda-node-body node)))
-     :env env)))
+     :body body
+     :env env
+     :cl-fn (lambda (&rest args)
+              (%call-user-function-from-cl-fn
+               evaled-params body env args nil)))))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Comprehensions

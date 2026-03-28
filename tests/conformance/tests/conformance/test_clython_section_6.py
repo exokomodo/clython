@@ -573,7 +573,6 @@ class TestSection63Calls:
         out, _, rc = clython_run("def f(**kw): return list(kw.keys())\nprint(f(a=1, b=2))")
         assert rc == 0 and out == "['a', 'b']"
 
-    @pytest.mark.xfail(reason="Star unpacking in function calls not yet supported")
     def test_star_unpack_in_call(self):
         out, _, rc = clython_run("def f(a, b, c): return a + b + c\nprint(f(*[1, 2, 3]))")
         assert rc == 0 and out == "6"
@@ -1580,12 +1579,10 @@ class TestSection614Lambdas:
         out, _, rc = clython_run("def make_adder(n):\n    return lambda x: x + n\nadd5 = make_adder(5)\nprint(add5(10))")
         assert rc == 0 and out == "15"
 
-    @pytest.mark.xfail(reason="Lambda passed to map/filter not yet supported (CL dispatch)")
     def test_lambda_in_map(self):
         out, _, rc = clython_run("print(list(map(lambda x: x * 2, [1, 2, 3])))")
         assert rc == 0 and out == "[2, 4, 6]"
 
-    @pytest.mark.xfail(reason="Lambda passed to map/filter not yet supported (CL dispatch)")
     def test_lambda_in_filter(self):
         out, _, rc = clython_run("print(list(filter(lambda x: x > 2, [1, 2, 3, 4, 5])))")
         assert rc == 0 and out == "[3, 4, 5]"
@@ -1658,7 +1655,6 @@ class TestSection615ExpressionLists:
         out, _, rc = clython_run("*a, b = [1, 2, 3, 4]\nprint(a, b)")
         assert rc == 0 and out == "[1, 2, 3] 4"
 
-    @pytest.mark.xfail(reason="Star unpacking in function calls not yet supported")
     def test_starred_in_function_call(self):
         out, _, rc = clython_run("print(*[1, 2, 3])")
         assert rc == 0 and out == "1 2 3"

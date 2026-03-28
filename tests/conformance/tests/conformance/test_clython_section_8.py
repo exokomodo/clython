@@ -947,7 +947,6 @@ class TestSection89DecoratorsExtended:
         )
         assert rc == 0 and out == "hello"
 
-    @pytest.mark.xfail(reason="decorator wrapper *args forwarding not fully implemented")
     def test_decorator_preserves_return(self):
         out, _, rc = clython_run(
             "def log(f):\n"
