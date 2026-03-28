@@ -615,11 +615,21 @@
           ;; Comma separating elements
           ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) ","))
            (ps-advance ps)
-           ;; Parse and push next element
-           (let ((elt (parse-star-expr-or-expr ps)))
-             (if (failp elt)
-                 (progn (ps-restore ps saved) (return +fail+))
-                 (push elt elts))))
+           ;; Check for trailing comma (creates single-element or trailing-comma tuple)
+           (let ((next-tok (ps-token ps)))
+             (when (and next-tok (eq (tok-type next-tok) :op)
+                        (string= (tok-value next-tok) ")"))
+               ;; Trailing comma — close the tuple
+               (ps-advance ps)
+               (return
+                 (make-node 'clython.ast:tuple-node
+                            :elts (nreverse elts) :ctx :load
+                            :line line :col col)))
+             ;; Parse next element
+             (let ((elt (parse-star-expr-or-expr ps)))
+               (if (failp elt)
+                   (progn (ps-restore ps saved) (return +fail+))
+                   (push elt elts)))))
           (t
            ;; Neither comma nor closing, invalid tuple syntax
            (ps-restore ps saved)

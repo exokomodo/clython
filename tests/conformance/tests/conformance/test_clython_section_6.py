@@ -368,7 +368,6 @@ class TestSection62Displays:
         out, _, rc = clython_run("print({'a': 1,})")
         assert rc == 0 and out == "{'a': 1}"
 
-    @pytest.mark.xfail(reason="Single-element tuple (1,) syntax error")
     def test_single_element_tuple(self):
         out, _, rc = clython_run("print((1,))")
         assert rc == 0 and out == "(1,)"
@@ -1638,7 +1637,6 @@ class TestSection615ExpressionLists:
         out, _, rc = clython_run("x = 1,\nprint(type(x).__name__, x)")
         assert rc == 0 and out == "tuple (1,)"
 
-    @pytest.mark.xfail(reason="Single-element tuple (42,) syntax not yet supported")
     def test_single_element_expression_list(self):
         out, _, rc = clython_run("x = (42,)\nprint(x)")
         assert rc == 0 and out == "(42,)"
