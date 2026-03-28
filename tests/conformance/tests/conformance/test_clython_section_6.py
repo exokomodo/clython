@@ -969,7 +969,6 @@ class TestSection67Arithmetic:
         out, _, rc = clython_run("print(7.5 // 2)")
         assert rc == 0 and out == "3.0"
 
-    @pytest.mark.xfail(reason="String % formatting not yet supported")
     def test_string_format_modulo(self):
         out, _, rc = clython_run("print('%s is %d' % ('pi', 3))")
         assert rc == 0 and out == "pi is 3"
@@ -1585,7 +1584,6 @@ class TestSection614Lambdas:
         out, _, rc = clython_run("print(list(filter(lambda x: x > 2, [1, 2, 3, 4, 5])))")
         assert rc == 0 and out == "[3, 4, 5]"
 
-    @pytest.mark.xfail(reason="Lambda as key= in sorted not yet supported (tuple comparison)")
     def test_lambda_in_sorted(self):
         out, _, rc = clython_run("print(sorted([(1, 'b'), (2, 'a')], key=lambda x: x[1]))")
         assert rc == 0 and out == "[(2, 'a'), (1, 'b')]"
@@ -1631,7 +1629,6 @@ class TestSection615ExpressionLists:
         out, _, rc = clython_run("a, b = 'x', 'y'\na, b = b, a\nprint(a, b)")
         assert rc == 0 and out == "y x"
 
-    @pytest.mark.xfail(reason="Trailing comma tuple packing not yet supported")
     def test_trailing_comma_creates_tuple(self):
         out, _, rc = clython_run("x = 1,\nprint(type(x).__name__, x)")
         assert rc == 0 and out == "tuple (1,)"

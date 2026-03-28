@@ -887,10 +887,21 @@
 
 ;;; ─── Function definition ──────────────────────────────────────────────────
 
+(defun %extract-docstring (body)
+  "If the first statement in BODY is a string constant (expr-stmt of a constant-node), return its value."
+  (when body
+    (let ((first-stmt (first body)))
+      (when (typep first-stmt 'clython.ast:expr-stmt-node)
+        (let ((val (clython.ast:expr-stmt-node-value first-stmt)))
+          (when (and (typep val 'clython.ast:constant-node)
+                     (stringp (clython.ast:constant-node-value val)))
+            (clython.ast:constant-node-value val)))))))
+
 (defmethod eval-node ((node clython.ast:function-def-node) env)
   (let* ((name (clython.ast:function-def-node-name node))
          (params (clython.ast:function-def-node-args node))
          (body (%sort-body (clython.ast:function-def-node-body node)))
+         (docstring (%extract-docstring body))
          ;; Evaluate default values now (at definition time)
          (evaled-params (%eval-defaults params env))
          (is-generator (%ast-contains-yield-p body))
@@ -900,6 +911,7 @@
                 :body body
                 :env env
                 :generator is-generator
+                :docstring docstring
                 :cl-fn (lambda (&rest args)
                          ;; This closure makes py-call work for user-defined functions
                          ;; (needed for decorators, first-class function passing via py-call)
@@ -1182,8 +1194,13 @@
          (class-env (clython.scope:env-extend env))
          (class-dict (make-hash-table :test #'equal)))
     ;; Execute class body in class scope
-    (dolist (stmt (%sort-body (clython.ast:class-def-node-body node)))
-      (eval-node stmt class-env))
+    (let ((sorted-body (%sort-body (clython.ast:class-def-node-body node))))
+      ;; Extract docstring
+      (let ((docstring (%extract-docstring sorted-body)))
+        (when docstring
+          (setf (gethash "__doc__" class-dict) (clython.runtime:make-py-str docstring))))
+      (dolist (stmt sorted-body)
+        (eval-node stmt class-env)))
     ;; Copy bindings from class scope into class dict
     (maphash (lambda (k v) (setf (gethash k class-dict) v))
              (clython.scope:env-bindings class-env))
@@ -1199,7 +1216,12 @@
                class-dict)
       ;; Register in exception hierarchy if any base is an exception class
       (%maybe-register-exception-class name bases)
-      (clython.scope:env-set name cls env))
+      ;; Apply decorators (in reverse order)
+      (let ((decorated cls))
+        (dolist (dec-node (reverse (clython.ast:class-def-node-decorator-list node)))
+          (let ((dec-fn (eval-node dec-node env)))
+            (setf decorated (clython.runtime:py-call dec-fn decorated))))
+        (clython.scope:env-set name decorated env)))
     clython.runtime:+py-none+))
 
 ;;; ─── Pass / Break / Continue ────────────────────────────────────────────────

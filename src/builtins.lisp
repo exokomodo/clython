@@ -424,8 +424,10 @@
 (defbuiltin +builtin-sorted+ "sorted" (&rest args)
   (let* ((iterable (first args))
          (items (collect-iter iterable))
-         (key-fn (getf (rest args) :key nil))
-         (reverse-p (getf (rest args) :reverse nil))
+         (key-fn (or (cdr (assoc "key" *current-kwargs* :test #'string=))
+                     (getf (rest args) :key nil)))
+         (reverse-p (or (cdr (assoc "reverse" *current-kwargs* :test #'string=))
+                        (getf (rest args) :reverse nil)))
          (sorted (sort (copy-list items)
                        (lambda (a b)
                          (if key-fn

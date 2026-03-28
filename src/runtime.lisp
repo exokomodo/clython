@@ -1127,6 +1127,53 @@
 (defmethod py-mod ((a py-int) (b py-float))
   (when (zerop (py-float-value b)) (py-raise "ZeroDivisionError" "float modulo"))
   (make-py-float (mod (float (py-int-value a) 1.0d0) (py-float-value b))))
+;;; String % formatting (printf-style)
+(defmethod py-mod ((a py-str) (b py-tuple))
+  "Python string % formatting with tuple of args."
+  (make-py-str (%py-string-format (py-str-value a) (coerce (py-tuple-value b) 'list))))
+
+(defmethod py-mod ((a py-str) b)
+  "Python string % formatting with single arg."
+  (make-py-str (%py-string-format (py-str-value a) (list b))))
+
+(defun %py-string-format (fmt args)
+  "Implement Python %-style string formatting."
+  (let ((result (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t))
+        (i 0)
+        (arg-idx 0))
+    (loop while (< i (length fmt)) do
+      (let ((ch (char fmt i)))
+        (if (and (char= ch #\%) (< (1+ i) (length fmt)))
+            (progn
+              (incf i)
+              (let ((spec (char fmt i)))
+                (case spec
+                  (#\s (vector-push-extend-string result (py-str-of (nth arg-idx args)))
+                       (incf arg-idx))
+                  (#\d (vector-push-extend-string result
+                         (write-to-string (py-int-value (nth arg-idx args))))
+                       (incf arg-idx))
+                  (#\f (vector-push-extend-string result
+                         (format nil "~F" (if (typep (nth arg-idx args) 'py-float)
+                                              (py-float-value (nth arg-idx args))
+                                              (float (py-int-value (nth arg-idx args)) 1.0d0))))
+                       (incf arg-idx))
+                  (#\r (vector-push-extend-string result (py-repr (nth arg-idx args)))
+                       (incf arg-idx))
+                  (#\x (vector-push-extend-string result
+                         (format nil "~x" (py-int-value (nth arg-idx args))))
+                       (incf arg-idx))
+                  (#\% (vector-push-extend #\% result))
+                  (otherwise (vector-push-extend #\% result)
+                             (vector-push-extend spec result)))
+                (incf i)))
+            (progn (vector-push-extend ch result) (incf i)))))
+    (coerce result 'string)))
+
+(defun vector-push-extend-string (vec str)
+  "Push all characters of STR onto adjustable VEC."
+  (loop for ch across str do (vector-push-extend ch vec)))
+
 ;; int ** float → float
 (defmethod py-pow ((a py-int) (b py-float))
   (make-py-float (expt (float (py-int-value a) 1.0d0) (py-float-value b))))
@@ -1649,7 +1696,8 @@
   ;; Built-in attributes for function objects
   (cond
     ((string= name "__name__") (make-py-str (or (py-function-name obj) "<lambda>")))
-    ((string= name "__doc__")  +py-none+)
+    ((string= name "__doc__")  (let ((doc (py-function-docstring obj)))
+                                (if doc (make-py-str doc) +py-none+)))
     (t (call-next-method))))
 
 (defmethod py-getattr ((obj py-type) (name string))

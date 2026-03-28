@@ -1954,12 +1954,11 @@
               (let ((e (parse-star-expr-or-expr ps)))
                 (when (failp e) (return))
                 (push e elts))))
-          (if (= (length elts) 1)
-              first-expr
-              (make-node 'clython.ast:tuple-node
-                         :elts (nreverse elts) :ctx ctx
-                         :line (clython.ast:node-line first-expr)
-                         :col (clython.ast:node-col first-expr))))
+          ;; Always produce a tuple when comma was seen (even single-element trailing comma)
+          (make-node 'clython.ast:tuple-node
+                     :elts (nreverse elts) :ctx ctx
+                     :line (clython.ast:node-line first-expr)
+                     :col (clython.ast:node-col first-expr)))
         first-expr)))
 
 (defrule parse-assignment-or-expr

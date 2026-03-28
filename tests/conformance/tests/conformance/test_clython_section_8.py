@@ -932,7 +932,6 @@ class TestSection89DecoratorsExtended:
         )
         assert rc == 0 and out == "d1(d2(hi))"
 
-    @pytest.mark.xfail(reason="class decorators not implemented")
     def test_class_decorator(self):
         out, _, rc = clython_run(
             "def add_greet(cls):\n"
