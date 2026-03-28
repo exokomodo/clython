@@ -858,7 +858,6 @@ class TestSection87ClassDefinitionsExtended:
         )
         assert rc == 0 and out == "1 2"
 
-    @pytest.mark.xfail(reason="@property may not be implemented")
     def test_property_decorator(self):
         out, _, rc = clython_run(
             "class Circle:\n"

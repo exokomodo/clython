@@ -326,16 +326,38 @@
 ;;; ─── Function/method calls ─────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:call-node) env)
-  ;; Special-case: super() with no args — needs calling env for __class__ and self
+  ;; Special-case builtins that need access to the calling environment
   (let ((func-node (clython.ast:call-node-func node)))
-    (when (and (typep func-node 'clython.ast:name-node)
-               (string= (clython.ast:name-node-id func-node) "super")
-               (null (clython.ast:call-node-args node)))
-      (let ((cls (ignore-errors (clython.scope:env-get "__class__" env)))
-            (self (ignore-errors (clython.scope:env-get "self" env))))
-        (when (and cls self)
-          (return-from eval-node
-            (make-instance 'clython.runtime:py-super :type cls :obj self))))))
+    (when (typep func-node 'clython.ast:name-node)
+      (let ((fname (clython.ast:name-node-id func-node)))
+        ;; super() with no args
+        (when (and (string= fname "super")
+                   (null (clython.ast:call-node-args node)))
+          (let ((cls (ignore-errors (clython.scope:env-get "__class__" env)))
+                (self (ignore-errors (clython.scope:env-get "self" env))))
+            (when (and cls self)
+              (return-from eval-node
+                (make-instance 'clython.runtime:py-super :type cls :obj self)))))
+        ;; globals() — return dict of global scope bindings
+        (when (and (string= fname "globals")
+                   (null (clython.ast:call-node-args node)))
+          (let ((d (clython.runtime:make-py-dict))
+                (global-env (loop with e = env
+                                  while (clython.scope:env-parent e)
+                                  do (setf e (clython.scope:env-parent e))
+                                  finally (return e))))
+            (maphash (lambda (k v)
+                       (clython.runtime:py-setitem d (clython.runtime:make-py-str k) v))
+                     (clython.scope:env-bindings global-env))
+            (return-from eval-node d)))
+        ;; locals() — return dict of current scope bindings
+        (when (and (string= fname "locals")
+                   (null (clython.ast:call-node-args node)))
+          (let ((d (clython.runtime:make-py-dict)))
+            (maphash (lambda (k v)
+                       (clython.runtime:py-setitem d (clython.runtime:make-py-str k) v))
+                     (clython.scope:env-bindings env))
+            (return-from eval-node d))))))
   (let* ((func (eval-node (clython.ast:call-node-func node) env))
          (args (loop for a in (clython.ast:call-node-args node)
                      if (typep a 'clython.ast:starred-node)

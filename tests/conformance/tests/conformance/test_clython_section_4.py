@@ -473,14 +473,12 @@ class TestSection42DynamicFeatures:
         out, _, rc = clython_run("exec('x = 42')\nprint(x)")
         assert rc == 0 and out == "42"
 
-    @pytest.mark.xfail(reason="globals() may not be implemented")
     def test_globals_contains_module_var(self):
         out, _, rc = clython_run(
             "x = 42\nprint('x' in globals())"
         )
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="locals() may not be implemented")
     def test_locals_in_function(self):
         out, _, rc = clython_run(
             "def f():\n"

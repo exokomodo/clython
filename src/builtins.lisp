@@ -29,6 +29,7 @@
    #:+builtin-set+
    #:+builtin-frozenset+
    #:+builtin-abs+
+   #:+builtin-round+
    #:+builtin-min+
    #:+builtin-max+
    #:+builtin-sum+
@@ -321,6 +322,26 @@
 (defbuiltin +builtin-abs+ "abs" (obj)
   (py-abs obj))
 
+(defbuiltin +builtin-round+ "round" (number &optional (ndigits nil ndigits-p))
+  (let ((val (cond
+               ((typep number 'py-int) (py-int-value number))
+               ((typep number 'py-float) (py-float-value number))
+               ((typep number 'py-bool) (if (eq number +py-true+) 1 0))
+               (t (py-raise "TypeError" "type ~A doesn't define __round__"
+                            (py-type-name number))))))
+    (if (or (not ndigits-p) (eq ndigits +py-none+))
+        ;; round(x) or round(x, None) → int
+        (make-py-int (round val))
+        ;; round(x, n) → float (or int if input was int)
+        (let ((n (cond
+                   ((typep ndigits 'py-int) (py-int-value ndigits))
+                   (t (py-raise "TypeError" "integer argument expected, got ~A"
+                                (py-type-name ndigits))))))
+          (let ((factor (expt 10.0d0 n)))
+            (if (typep number 'py-int)
+                (make-py-int (round val))
+                (make-py-float (/ (fround (* val factor)) factor))))))))
+
 (defbuiltin +builtin-min+ "min" (&rest args)
   (let ((items (if (and (= (length args) 1)
                         (not (typep (first args) 'py-int))
@@ -585,6 +606,7 @@
                (cons "set"          +builtin-set+)
                (cons "frozenset"    +builtin-frozenset+)
                (cons "abs"          +builtin-abs+)
+               (cons "round"        +builtin-round+)
                (cons "min"          +builtin-min+)
                (cons "max"          +builtin-max+)
                (cons "sum"          +builtin-sum+)
