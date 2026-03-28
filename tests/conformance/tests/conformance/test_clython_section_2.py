@@ -882,7 +882,6 @@ class TestSection23IdentifierContexts:
         assert rc == 0
         assert out == "42"
 
-    @pytest.mark.xfail(reason="Clython reports class type as PY-OBJECT instead of class name")
     def test_class_name(self):
         out, _, rc = clython_run("class MyClass:\n    pass\nprint(type(MyClass()))")
         assert rc == 0

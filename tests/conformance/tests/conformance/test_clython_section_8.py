@@ -830,7 +830,7 @@ class TestSection87ClassDefinitionsExtended:
         )
         assert rc == 0 and out == "True True"
 
-    @pytest.mark.xfail(reason="issubclass not correctly implemented for user-defined classes")
+    def test_issubclass_not_correctly_implemented_for_user(self):
         out, _, rc = clython_run(
             "class Base:\n    pass\n"
             "class Child(Base):\n    pass\n"
