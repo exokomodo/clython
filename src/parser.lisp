@@ -1561,6 +1561,8 @@
           ;; Parse statements until DEDENT
           (let ((stmts '()))
             (loop
+              ;; Skip blank-line NEWLINEs before checking for DEDENT
+              (skip-newlines ps)
               (let ((dtok (ps-token ps)))
                 (when (or (null dtok) (eq (tok-type dtok) :dedent))
                   (when dtok (ps-advance ps)) ; consume DEDENT

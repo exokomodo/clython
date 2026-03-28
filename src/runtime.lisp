@@ -34,6 +34,7 @@
    #:py-module
    #:py-iterator
    #:py-generator
+   #:py-coroutine
    #:py-range
    #:py-slice
 
@@ -54,6 +55,7 @@
    #:py-function-env
    #:py-function-cl-fn
    #:py-function-generator
+   #:py-function-async-p
    #:py-method-function
    #:py-method-self
    #:py-type-name
@@ -69,6 +71,10 @@
    #:py-generator-sent-value
    #:py-generator-finished
    #:py-generator-thread
+   #:py-coroutine-body-fn
+   #:py-coroutine-result
+   #:py-coroutine-finished
+   #:py-coroutine-started
    #:py-range-start
    #:py-range-stop
    #:py-range-step
@@ -104,6 +110,8 @@
    #:make-py-iterator
    #:make-py-generator
    #:py-generator-send
+   #:make-py-coroutine
+   #:py-coroutine-run
    #:make-py-range
    #:make-py-slice
 
@@ -336,17 +344,19 @@
    (%body      :initarg :body      :accessor py-function-body      :initform nil)
    (%env       :initarg :env       :accessor py-function-env       :initform nil)
    (%cl-fn     :initarg :cl-fn     :accessor py-function-cl-fn     :initform nil)
-   (%generator :initarg :generator :accessor py-function-generator :initform nil))
+   (%generator :initarg :generator :accessor py-function-generator :initform nil)
+   (%async-p   :initarg :async-p   :accessor py-function-async-p   :initform nil))
   (:documentation "Python function or lambda."))
 
-(defun make-py-function (&key name params body env cl-fn generator)
+(defun make-py-function (&key name params body env cl-fn generator async-p)
   (make-instance 'py-function
                  :name (or name "<lambda>")
                  :params (or params '())
                  :body body
                  :env env
                  :cl-fn cl-fn
-                 :generator generator))
+                 :generator generator
+                 :async-p async-p))
 
 ;;; method -----------------------------------------------------------------
 (defclass py-super (py-object)
@@ -482,6 +492,40 @@
         (let ((val (py-generator-value gen)))
           (setf (py-generator-value gen) nil)
           val))))
+
+;;; coroutine --------------------------------------------------------------
+(defclass py-coroutine (py-object)
+  ((%body-fn  :initarg :body-fn  :accessor py-coroutine-body-fn  :initform nil)
+   (%result   :accessor py-coroutine-result   :initform nil)
+   (%finished :accessor py-coroutine-finished :initform nil)
+   (%started  :accessor py-coroutine-started  :initform nil)
+   (%error    :accessor py-coroutine-error    :initform nil))
+  (:documentation "Python coroutine object (returned by async def functions).
+   In Clython's synchronous interpreter, coroutines run eagerly when awaited."))
+
+(defun make-py-coroutine (body-fn)
+  "Create a coroutine. BODY-FN is a thunk that executes the async function body."
+  (make-instance 'py-coroutine :body-fn body-fn))
+
+(defun py-coroutine-run (coro)
+  "Drive a coroutine to completion synchronously. Returns the result.
+   If already finished, returns the cached result."
+  (when (py-coroutine-finished coro)
+    (if (py-coroutine-error coro)
+        (error (py-coroutine-error coro))
+        (return-from py-coroutine-run (py-coroutine-result coro))))
+  (when (py-coroutine-started coro)
+    (py-raise "RuntimeError" "coroutine is being awaited"))
+  (setf (py-coroutine-started coro) t)
+  (handler-case
+      (let ((result (funcall (py-coroutine-body-fn coro))))
+        (setf (py-coroutine-result coro) result
+              (py-coroutine-finished coro) t)
+        result)
+    (error (e)
+      (setf (py-coroutine-error coro) e
+            (py-coroutine-finished coro) t)
+      (error e))))
 
 ;;; range ------------------------------------------------------------------
 (defclass py-range (py-object)
@@ -718,6 +762,10 @@
 (defmethod py-repr ((obj py-generator))
   (make-py-str "<generator object>"))
 (defmethod py-str-of ((obj py-generator)) (py-repr obj))
+
+(defmethod py-repr ((obj py-coroutine))
+  (make-py-str "<coroutine object>"))
+(defmethod py-str-of ((obj py-coroutine)) (py-repr obj))
 
 (defmethod py-repr ((obj py-iterator))
   "<iterator>")
@@ -1710,6 +1758,7 @@
 (defmethod py-type-of ((obj py-type))      "type")
 (defmethod py-type-of ((obj py-module))    "module")
 (defmethod py-type-of ((obj py-iterator))  "iterator")
+(defmethod py-type-of ((obj py-coroutine)) "coroutine")
 (defmethod py-type-of ((obj py-range))     "range")
 (defmethod py-type-of ((obj py-object))    (string (class-name (class-of obj))))
 
