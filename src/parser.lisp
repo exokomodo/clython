@@ -2727,20 +2727,27 @@
          (if (failp expr) +fail+
              (make-node 'clython.ast:match-value-node :value expr
                         :line (tok-line tok) :col (tok-col tok)))))
-      ;; Name (capture pattern or value pattern if dotted)
+      ;; Name — could be capture, value (dotted), or class pattern (Name(...))
       ((and tok (eq (tok-type tok) :name))
-       (let ((expr (parse-primary ps)))
-         (if (failp expr) +fail+
-             ;; Simple name -> capture if not dotted, value if dotted
-             (if (typep expr 'clython.ast:name-node)
-                 (make-node 'clython.ast:match-as-node
-                            :pattern nil
-                            :name (clython.ast:name-node-id expr)
-                            :line (clython.ast:node-line expr)
-                            :col (clython.ast:node-col expr))
-                 (make-node 'clython.ast:match-value-node :value expr
-                            :line (clython.ast:node-line expr)
-                            :col (clython.ast:node-col expr))))))
+       (let ((saved (ps-save ps))
+             (expr (parse-primary ps)))
+         (if (failp expr)
+             +fail+
+             ;; Check for class pattern: Name( or Name.attr(
+             (let ((next (ps-token ps)))
+               (if (and next (eq (tok-type next) :op) (string= (tok-value next) "("))
+                   ;; Class pattern
+                   (%parse-match-class-pattern expr ps)
+                   ;; Simple name -> capture if not dotted, value if dotted
+                   (if (typep expr 'clython.ast:name-node)
+                       (make-node 'clython.ast:match-as-node
+                                  :pattern nil
+                                  :name (clython.ast:name-node-id expr)
+                                  :line (clython.ast:node-line expr)
+                                  :col (clython.ast:node-col expr))
+                       (make-node 'clython.ast:match-value-node :value expr
+                                  :line (clython.ast:node-line expr)
+                                  :col (clython.ast:node-col expr))))))))
       ;; [ ] sequence pattern
       ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "["))
        (ps-advance ps)
@@ -2878,6 +2885,67 @@
                     :rest rest-name
                     :line (tok-line tok) :col (tok-col tok))))
       (t +fail+))))
+
+(defun %parse-match-class-pattern (cls-expr ps)
+  "Parse a class pattern: ClassName(pos_pat, ..., key=pat, ...).
+   CLS-EXPR is the already-parsed class name/dotted-name expression.
+   The '(' has NOT been consumed yet."
+  (ps-advance ps) ;; consume '('
+  (let ((pos-pats '())
+        (kwd-attrs '())
+        (kwd-pats '())
+        (in-keywords nil))
+    ;; Parse arguments until ')'
+    (loop
+      (let ((close (ps-token ps)))
+        (when (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
+          (ps-advance ps)
+          (return)))
+      ;; Check for keyword=pattern: NAME '='
+      (let ((saved (ps-save ps))
+            (maybe-name (ps-token ps)))
+        (if (and maybe-name (eq (tok-type maybe-name) :name))
+            (progn
+              (ps-advance ps)
+              (let ((eq-tok (ps-token ps)))
+                (if (and eq-tok (eq (tok-type eq-tok) :op) (string= (tok-value eq-tok) "="))
+                    ;; Keyword argument
+                    (progn
+                      (ps-advance ps)
+                      (setf in-keywords t)
+                      (let ((pat (parse-match-pattern ps)))
+                        (if (failp pat)
+                            (return)
+                            (progn
+                              (push (tok-value maybe-name) kwd-attrs)
+                              (push pat kwd-pats)))))
+                    ;; Not a keyword — restore and parse as positional
+                    (progn
+                      (ps-restore ps saved)
+                      (if in-keywords
+                          (return) ;; positional after keyword is an error; bail
+                          (let ((pat (parse-match-pattern ps)))
+                            (if (failp pat)
+                                (return)
+                                (push pat pos-pats))))))))
+            ;; Not a name — parse as positional pattern
+            (if in-keywords
+                (return)
+                (let ((pat (parse-match-pattern ps)))
+                  (if (failp pat)
+                      (return)
+                      (push pat pos-pats))))))
+      ;; Skip comma
+      (let ((comma (ps-token ps)))
+        (when (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+          (ps-advance ps))))
+    (make-node 'clython.ast:match-class-node
+               :cls cls-expr
+               :patterns (nreverse pos-pats)
+               :kwd-attrs (nreverse kwd-attrs)
+               :kwd-patterns (nreverse kwd-pats)
+               :line (clython.ast:node-line cls-expr)
+               :col (clython.ast:node-col cls-expr))))
 
 (defrule parse-match-pattern
   ;; Top-level entry point for pattern parsing

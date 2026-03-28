@@ -164,7 +164,7 @@
       +py-false+
       (py-bool-from-cl (py-bool-val (first args)))))
 
-(defvar *type-type* nil
+(defvar *type-type* (make-py-type :name "type")
   "Canonical 'type' type object for type(type) is type.")
 
 (defbuiltin +builtin-type+ "type" (&rest args)
@@ -639,7 +639,7 @@
                (cons "int"          +builtin-int+)
                (cons "float"        +builtin-float+)
                (cons "bool"         +builtin-bool+)
-               (cons "type"         +builtin-type+)
+               (cons "type"         *type-type*)
                (cons "len"          +builtin-len+)
                (cons "isinstance"   +builtin-isinstance+)
                (cons "issubclass"   +builtin-issubclass+)

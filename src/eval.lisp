@@ -99,6 +99,17 @@
 ;;;; Literals / Atoms
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 
+(defun %bytes-literal-p (s)
+  "Return T if S starts with a b or B prefix (bytes literal)."
+  (and (> (length s) 0)
+       (let ((start 0))
+         ;; Skip r/R prefix if before b
+         (when (and (< start (length s))
+                    (find (char s start) "rR"))
+           (incf start))
+         (and (< start (length s))
+              (find (char s start) "bB")))))
+
 (defun %unquote-string (s)
   "Strip quotes and string prefix from a Python string literal token value.
    E.g. \"hello\" → hello, 'hi' → hi, r\"raw\" → raw, \"\"\"triple\"\"\" → triple
@@ -187,7 +198,11 @@
       ((integerp val)    (clython.runtime:make-py-int val))
       ((floatp val)      (clython.runtime:make-py-float (coerce val 'double-float)))
       ((complexp val)    (clython.runtime:make-py-complex val))
-      ((stringp val)     (clython.runtime:make-py-str (%unquote-string val)))
+      ((stringp val)
+       (if (%bytes-literal-p val)
+           (clython.runtime:make-py-bytes
+            (map '(vector (unsigned-byte 8)) #'char-code (%unquote-string val)))
+           (clython.runtime:make-py-str (%unquote-string val))))
       ;; Adjacent string concatenation: (:concat-strings "part1" "part2" ...)
       ((and (consp val) (eq (car val) :concat-strings))
        (clython.runtime:make-py-str
@@ -270,7 +285,11 @@
     (:bit-and   (clython.runtime:py-and left right))
     (:bit-or    (clython.runtime:py-or left right))
     (:bit-xor   (clython.runtime:py-xor left right))
-    (:mat-mult  (clython.runtime:py-raise "TypeError" "@ operator not supported"))))
+    (:mat-mult  (if (typep left 'clython.runtime:py-object)
+                    (let ((fn (clython.runtime:%lookup-dunder left "__matmul__")))
+                      (if fn (clython.runtime:py-call fn left right)
+                          (clython.runtime:py-raise "TypeError" "@ operator not supported")))
+                    (clython.runtime:py-raise "TypeError" "@ operator not supported")))))
 
 (defmethod eval-node ((node clython.ast:bin-op-node) env)
   (let ((left  (eval-node (clython.ast:bin-op-node-left node) env))
@@ -1740,9 +1759,17 @@
 ;;;; Match statement (PEP 634)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %match-class-subtype-p (cls target)
+  "Check if CLS is TARGET or has TARGET as an ancestor in its bases."
+  (when (typep cls 'clython.runtime:py-type)
+    (or (eq cls target)
+        (some (lambda (base) (%match-class-subtype-p base target))
+              (clython.runtime:py-type-bases cls)))))
+
 (defun %match-pattern (subject pattern env)
   "Try to match SUBJECT (a py-object) against PATTERN (an AST pattern node).
    Returns T if matched, NIL otherwise. On match, binds captured names in ENV."
+  ;; (format t "~&DEBUG match-pattern: pattern-type=~S~%" (type-of pattern))
   (typecase pattern
     ;; Wildcard or capture: match-as-node with pattern=NIL
     (clython.ast:match-as-node
@@ -1863,8 +1890,55 @@
                                     env)))
          t)))
 
-    ;; Class pattern (not yet fully supported)
-    (clython.ast:match-class-node nil)
+    ;; Class pattern — match subject against a class, bind positional/keyword args
+    (clython.ast:match-class-node
+     (let* ((cls-node (clython.ast:match-class-node-cls pattern))
+            (cls (eval-node cls-node env))
+            (pos-pats (clython.ast:match-class-node-patterns pattern))
+            (kwd-attrs (clython.ast:match-class-node-kwd-attrs pattern))
+            (kwd-pats (clython.ast:match-class-node-kwd-patterns pattern)))
+       ;; DEBUG
+         ;; debug removed
+       ;; Check isinstance
+       (when (and (typep subject 'clython.runtime:py-object)
+                  (let ((obj-cls (clython.runtime:py-object-class subject)))
+                    (or (eq obj-cls cls)
+                        (and (typep obj-cls 'clython.runtime:py-type)
+                             (typep cls 'clython.runtime:py-type)
+                             (%match-class-subtype-p obj-cls cls)))))
+         ;; Match positional patterns using __match_args__
+         (let ((all-match t))
+           ;; Positional args via __match_args__
+           (when pos-pats
+             (let* ((match-args-val (handler-case
+                                        (clython.runtime:py-getattr cls "__match_args__")
+                                      (error () nil)))
+                    (match-args (when (typep match-args-val 'clython.runtime:py-tuple)
+                                  (clython.runtime:py-tuple-value match-args-val))))
+               (loop for pat in pos-pats
+                     for i from 0
+                     while all-match
+                     do (if (< i (length match-args))
+                            (let* ((attr-name (clython.runtime:py-str-value (nth i match-args)))
+                                   (attr-val (handler-case
+                                                 (clython.runtime:py-getattr subject attr-name)
+                                               (error () (setf all-match nil) nil))))
+                              (when all-match
+                                (unless (%match-pattern pat attr-val env)
+                                  (setf all-match nil))))
+                            (setf all-match nil)))))
+           ;; Keyword args
+           (when (and all-match kwd-attrs)
+             (loop for attr-name in kwd-attrs
+                   for kwd-pat in kwd-pats
+                   while all-match
+                   do (let ((attr-val (handler-case
+                                          (clython.runtime:py-getattr subject attr-name)
+                                        (error () (setf all-match nil) nil))))
+                        (when all-match
+                          (unless (%match-pattern kwd-pat attr-val env)
+                            (setf all-match nil))))))
+           all-match))))
 
     (t nil)))
 

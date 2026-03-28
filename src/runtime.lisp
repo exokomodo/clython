@@ -2287,26 +2287,56 @@
 (defmethod py-call ((cls py-type) &rest args)
   "Instantiate a class: create an instance, then call __init__ if defined.
    If the class is in the exception hierarchy, create a py-exception-object.
+   If the class is 'type', delegate to the type() builtin logic.
    Uses MRO lookup to find inherited __init__."
   (let ((name (py-type-name cls)))
-    (if (gethash name *exception-hierarchy*)
-        ;; Exception class — create py-exception-object directly
-        (let ((exc-obj (make-py-exception-object name args)))
-          ;; Still call __init__ if user defined one
-          (multiple-value-bind (init-fn found)
-              (%lookup-in-class-hierarchy cls "__init__")
-            (when found
-              (apply #'py-call init-fn exc-obj args)))
-          exc-obj)
-        ;; Normal class
-        (let ((instance (make-instance 'py-object
-                                       :py-class cls
-                                       :py-dict (make-hash-table :test #'equal))))
-          (multiple-value-bind (init-fn found)
-              (%lookup-in-class-hierarchy cls "__init__")
-            (when found
-              (apply #'py-call init-fn instance args)))
-          instance))))
+    (cond
+     ;; type(obj) or type(name, bases, dict)
+     ((string= name "type")
+      (cond
+        ((= (length args) 1)
+         ;; type(obj) — return the type
+         (let* ((obj (first args))
+                (obj-cls (py-object-class obj)))
+           (cond
+             ((typep obj-cls 'py-type) obj-cls)
+             ((typep obj 'py-type) cls)  ;; type(SomeClass) → type
+             ((and (typep obj 'py-function)
+                   (member (py-function-name obj)
+                           '("int" "str" "float" "bool" "list" "tuple" "dict"
+                             "set" "frozenset" "bytes" "type" "object" "complex"
+                             "range" "enumerate" "zip" "map" "filter" "reversed"
+                             "super" "property" "staticmethod" "classmethod")
+                           :test #'string=))
+              cls)
+             (t (make-py-type :name (py-type-of obj))))))
+        ((= (length args) 3)
+         ;; type(name, bases, dict)
+         (let* ((tname (py-str-value (first args)))
+                (bases (coerce (py-tuple-value (second args)) 'list))
+                (tdict (make-hash-table :test #'equal)))
+           (maphash (lambda (k v) (setf (gethash k tdict) v))
+                    (py-dict-value (third args)))
+           (make-py-type :name tname :bases bases :tdict tdict)))
+        (t (py-raise "TypeError" "type() takes 1 or 3 arguments"))))
+     ;; Exception class — create py-exception-object directly
+     ((gethash name *exception-hierarchy*)
+      (let ((exc-obj (make-py-exception-object name args)))
+        (multiple-value-bind (init-fn found)
+            (%lookup-in-class-hierarchy cls "__init__")
+          (when found
+            (apply #'py-call init-fn exc-obj args)))
+        exc-obj))
+     ;; Normal class
+     (t
+      (let ((instance (make-instance 'py-object
+                                     :py-class cls
+                                     :py-dict (make-hash-table :test #'equal))))
+        (multiple-value-bind (init-fn found)
+            (%lookup-in-class-hierarchy cls "__init__")
+          (when found
+            (apply #'py-call init-fn instance args)))
+        instance)))))
 
 ;;; __contains__ -----------------------------------------------------------
 

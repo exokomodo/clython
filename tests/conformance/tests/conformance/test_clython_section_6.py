@@ -982,7 +982,6 @@ class TestSection67Arithmetic:
         out, _, rc = clython_run("print((2 + 3) * (4 - 1))")
         assert rc == 0 and out == "15"
 
-    @pytest.mark.xfail(reason="Matrix multiplication @ not yet supported")
     def test_matmul_operator(self):
         """@ operator for matrix multiplication (requires __matmul__)."""
         out, _, rc = clython_run("class M:\n    def __matmul__(self, other): return 42\nprint(M() @ M())")

@@ -1164,23 +1164,21 @@ class TestSection25StringLiteralsExtended:
 class TestSection25BytesLiterals:
     """2.5/2.7: Bytes literal tests."""
 
-    @pytest.mark.xfail(reason="Clython treats b'' as str, not bytes")
     def test_bytes_type(self):
         out, _, rc = clython_run("print(type(b'hello'))")
         assert rc == 0
         assert out == "<class 'bytes'>"
 
-    @pytest.mark.xfail(reason="Clython treats b'' as str, not bytes; repr differs")
     def test_bytes_repr(self):
         out, _, rc = clython_run("print(repr(b'hello'))")
         assert rc == 0
         assert out == "b'hello'"
 
     def test_bytes_print_value(self):
-        """b'hello' prints its content (Clython treats as str)."""
+        """print(b'hello') outputs b'hello' (Python semantics)."""
         out, _, rc = clython_run("print(b'hello')")
         assert rc == 0
-        assert out == "hello"
+        assert out == "b'hello'"
 
 
 class TestSection25FStringsExtended:

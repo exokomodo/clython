@@ -307,12 +307,10 @@ class TestSection32TypeHierarchy:
         out, _, rc = clython_run("print(issubclass(bool, int))")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="type(type) identity not yet supported")
     def test_type_of_type_is_type(self):
         out, _, rc = clython_run("print(type(type) is type)")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="type(int) is type not yet supported")
     def test_type_of_int_is_type(self):
         out, _, rc = clython_run("print(type(int) is type)")
         assert rc == 0 and out == "True"
