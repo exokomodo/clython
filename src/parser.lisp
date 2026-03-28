@@ -1512,8 +1512,9 @@
         +fail+)))
 
 (defun parse-expression-list-opt (ps)
-  "Parse an optional expression list (for yield, return, etc.)."
-  (let ((expr (parse-star-expr-or-expr ps)))
+  "Parse an optional expression list (for yield, return, etc.).
+   Comma-separated values produce a tuple."
+  (let ((expr (parse-expression-list ps)))
     (if (failp expr) nil expr)))
 
 ;;; --- Star expression ---

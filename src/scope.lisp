@@ -99,7 +99,7 @@
       (multiple-value-bind (val found) (gethash name (env-bindings root))
         (if found
             (return-from env-get val)
-            (error "NameError: name '~A' is not defined" name)))))
+            (clython.runtime:py-raise "NameError" "name '~A' is not defined" name)))))
   ;; If this scope declares the name as nonlocal, skip local and search enclosing
   (when (gethash name (env-nonlocals env))
     (let ((e (env-parent env)))
@@ -107,7 +107,7 @@
         (multiple-value-bind (val found) (gethash name (env-bindings e))
           (when found (return-from env-get val)))
         (setf e (env-parent e))))
-    (error "NameError: name '~A' is not defined" name))
+    (clython.runtime:py-raise "NameError" "name '~A' is not defined" name))
   ;; Normal LEGB: search local → parent chain
   (let ((e env))
     (loop while e do
@@ -117,7 +117,7 @@
   ;; Builtin fallback — check the builtins registry directly
   (multiple-value-bind (builtin found) (gethash name clython.builtins:*builtins*)
     (when found (return-from env-get builtin)))
-  (error "NameError: name '~A' is not defined" name))
+  (clython.runtime:py-raise "NameError" "name '~A' is not defined" name))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Assignment
@@ -159,4 +159,4 @@
 (defun env-del (name env)
   "Delete NAME from the current scope."
   (unless (remhash name (env-bindings env))
-    (error "NameError: name '~A' is not defined" name)))
+    (clython.runtime:py-raise "NameError" "name '~A' is not defined" name)))

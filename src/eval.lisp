@@ -219,7 +219,7 @@
     (:bit-and   (clython.runtime:py-and left right))
     (:bit-or    (clython.runtime:py-or left right))
     (:bit-xor   (clython.runtime:py-xor left right))
-    (:mat-mult  (error "TypeError: @ operator not supported"))))
+    (:mat-mult  (clython.runtime:py-raise "TypeError" "@ operator not supported"))))
 
 (defmethod eval-node ((node clython.ast:bin-op-node) env)
   (let ((left  (eval-node (clython.ast:bin-op-node-left node) env))
@@ -363,7 +363,7 @@
                (t (let ((default-idx (- i num-required)))
                     (if (and (>= default-idx 0) (< default-idx num-defaults))
                         (clython.scope:env-set name (nth default-idx defaults) env)
-                        (error "TypeError: ~A() missing required positional argument: '~A'"
+                        (clython.runtime:py-raise "TypeError" "~A() missing required positional argument: '~A'"
                                "function" name))))))
     ;; Bind *args
     (when vararg
@@ -586,7 +586,7 @@
     ;; Starred in assignment target context
     ((typep target 'clython.ast:starred-node)
      (%assign-target (clython.ast:starred-node-value target) value env))
-    (t (error "SyntaxError: cannot assign to ~A" (type-of target)))))
+    (t (clython.runtime:py-raise "SyntaxError" "cannot assign to ~A" (type-of target)))))
 
 (defmethod eval-node ((node clython.ast:assign-node) env)
   (let ((value (eval-node (clython.ast:assign-node-value node) env)))
@@ -791,6 +791,26 @@
           ;; fallback
           (t nil))))))
 
+(defun %handle-exception (exc-val handlers node env)
+  "Try to match exc-val against handlers. Returns T if handled, NIL otherwise.
+   Signals the original error if not handled."
+  (let ((handled nil))
+    (dolist (handler handlers)
+      (unless handled
+        ;; Check if the handler type matches the raised exception
+        (when (%exception-matches-handler-p
+               exc-val
+               (clython.ast:exception-handler-type handler)
+               env)
+          ;; Bind the exception to the handler's variable name (if any)
+          (when (clython.ast:exception-handler-name handler)
+            (clython.scope:env-set (clython.ast:exception-handler-name handler)
+                                   exc-val env))
+          (dolist (stmt (%sort-body (clython.ast:exception-handler-body handler)))
+            (eval-node stmt env))
+          (setf handled t))))
+    handled))
+
 (defmethod eval-node ((node clython.ast:try-node) env)
   (let ((caught nil))
     (handler-case
@@ -799,24 +819,20 @@
             (eval-node stmt env)))
       (py-exception (e)
         (setf caught t)
-        (let ((*current-exception* e)
-              (handled nil)
-              (exc-val (py-exception-value e)))
-          (dolist (handler (clython.ast:try-node-handlers node))
-            (unless handled
-              ;; Check if the handler type matches the raised exception
-              (when (%exception-matches-handler-p
-                     exc-val
-                     (clython.ast:exception-handler-type handler)
-                     env)
-                ;; Bind the exception to the handler's variable name (if any)
-                (when (clython.ast:exception-handler-name handler)
-                  (clython.scope:env-set (clython.ast:exception-handler-name handler)
-                                         exc-val env))
-                (dolist (stmt (%sort-body (clython.ast:exception-handler-body handler)))
-                  (eval-node stmt env))
-                (setf handled t))))
-          (unless handled
+        (let* ((*current-exception* e)
+               (exc-val (py-exception-value e)))
+          (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
+            (error e))))
+      (clython.runtime:py-runtime-error (e)
+        (setf caught t)
+        ;; Convert runtime error to a py-exception-object for uniform handling
+        (let* ((exc-val (clython.runtime:make-py-exception-object
+                         (clython.runtime:py-runtime-error-class-name e)
+                         (list (clython.runtime:make-py-str
+                                (clython.runtime:py-runtime-error-message e)))))
+               (wrapper (make-condition 'py-exception :value exc-val))
+               (*current-exception* wrapper))
+          (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
             (error e)))))
     ;; else clause (runs if no exception was raised)
     (unless caught
@@ -870,7 +886,7 @@
                         (setf found t))
                     (error () nil))))
               (unless found
-                (error "ImportError: cannot import name '~A' from '~A'" name module-name))
+                (clython.runtime:py-raise "ImportError" "cannot import name '~A' from '~A'" name module-name))
               (clython.scope:env-set asname val env))))))
   clython.runtime:+py-none+)
 

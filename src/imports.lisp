@@ -149,6 +149,75 @@
           (clython.runtime:make-py-str "builtins"))
     mod))
 
+(defun %math-wrap-2 (name cl-fn)
+  "Wrap a two-arg CL math function as a Python callable."
+  (clython.runtime:make-py-function
+   :name name
+   :cl-fn (lambda (x y)
+            (clython.runtime:make-py-float
+             (funcall cl-fn
+                      (coerce (clython.runtime:py->cl x) 'double-float)
+                      (coerce (clython.runtime:py->cl y) 'double-float))))))
+
+(defun make-math-module ()
+  "Create the math built-in module."
+  (let ((mod (clython.runtime:make-py-module "math"))
+        (d nil))
+    (setf d (clython.runtime:py-module-dict mod))
+    ;; Constants
+    (setf (gethash "pi" d) (clython.runtime:make-py-float (coerce pi 'double-float)))
+    (setf (gethash "e" d) (clython.runtime:make-py-float (exp 1.0d0)))
+    (setf (gethash "tau" d) (clython.runtime:make-py-float (* 2.0d0 (coerce pi 'double-float))))
+    (setf (gethash "inf" d) (clython.runtime:make-py-float
+                              #+sbcl sb-ext:double-float-positive-infinity
+                              #-sbcl most-positive-double-float))
+    (setf (gethash "nan" d) (clython.runtime:make-py-float
+                              #+sbcl (sb-int:with-float-traps-masked (:invalid)
+                                       (- sb-ext:double-float-positive-infinity
+                                          sb-ext:double-float-positive-infinity))
+                              #-sbcl 0.0d0))
+    ;; Single-arg functions
+    (dolist (pair '((sqrt . cl:sqrt) (sin . cl:sin) (cos . cl:cos) (tan . cl:tan)
+                    (asin . cl:asin) (acos . cl:acos) (atan . cl:atan)
+                    (exp . cl:exp) (log . cl:log)
+                    (floor . cl:floor) (ceil . cl:ceiling)))
+      (let ((name (symbol-name (car pair)))
+            (fn (cdr pair)))
+        (setf (gethash (string-downcase name) d)
+              (clython.runtime:make-py-function
+               :name (string-downcase name)
+               :cl-fn (let ((f fn))  ; capture
+                         (lambda (x)
+                           (let ((result (funcall f (coerce (clython.runtime:py->cl x) 'double-float))))
+                             (if (integerp result)
+                                 (clython.runtime:make-py-int result)
+                                 (clython.runtime:make-py-float (coerce result 'double-float))))))))))
+    ;; fabs
+    (setf (gethash "fabs" d)
+          (clython.runtime:make-py-function
+           :name "fabs"
+           :cl-fn (lambda (x)
+                    (clython.runtime:make-py-float
+                     (abs (coerce (clython.runtime:py->cl x) 'double-float))))))
+    ;; pow
+    (setf (gethash "pow" d) (%math-wrap-2 "pow" #'expt))
+    ;; isnan, isinf
+    (setf (gethash "isnan" d)
+          (clython.runtime:make-py-function
+           :name "isnan"
+           :cl-fn (lambda (x)
+                    (let ((v (coerce (clython.runtime:py->cl x) 'double-float)))
+                      (clython.runtime:cl->py #+sbcl (sb-ext:float-nan-p v) #-sbcl nil)))))
+    (setf (gethash "isinf" d)
+          (clython.runtime:make-py-function
+           :name "isinf"
+           :cl-fn (lambda (x)
+                    (let ((v (coerce (clython.runtime:py->cl x) 'double-float)))
+                      (clython.runtime:cl->py #+sbcl (sb-ext:float-infinity-p v) #-sbcl nil)))))
+    ;; Module metadata
+    (setf (gethash "__name__" d) (clython.runtime:make-py-str "math"))
+    mod))
+
 (defun register-builtin-modules ()
   "Register all built-in module stubs."
   (setf (gethash "sys" *builtin-modules*) #'make-sys-module)
@@ -169,7 +238,8 @@
   (setf (gethash "nt" *builtin-modules*) (lambda () (make-stub-module "nt")))
   (setf (gethash "marshal" *builtin-modules*) (lambda () (make-stub-module "marshal")))
   (setf (gethash "_imp" *builtin-modules*) (lambda () (make-stub-module "_imp")))
-  (setf (gethash "winreg" *builtin-modules*) (lambda () (make-stub-module "winreg"))))
+  (setf (gethash "winreg" *builtin-modules*) (lambda () (make-stub-module "winreg")))
+  (setf (gethash "math" *builtin-modules*) #'make-math-module))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Module finder
@@ -224,7 +294,7 @@
   ;; 3. Find .py file
   (multiple-value-bind (path is-package) (find-module-file name)
     (unless path
-      (error "ImportError: No module named '~A'" name))
+      (clython.runtime:py-raise "ImportError" "No module named '~A'" name))
 
     ;; 4. Create module with its own environment
     (let ((mod (clython.runtime:make-py-module name)))
@@ -271,7 +341,7 @@
         (error (e)
           ;; If loading fails, remove from registry and re-signal
           (remhash name *module-registry*)
-          (error "ImportError: Error loading module '~A': ~A" name e)))
+          (clython.runtime:py-raise "ImportError" "Error loading module '~A': ~A" name e)))
 
       ;; 8. For dotted names, set as attribute on parent module
       (let ((dot-pos (position #\. name :from-end t)))

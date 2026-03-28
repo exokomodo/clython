@@ -147,9 +147,38 @@
    ;; Helpers
    #:py-object-p
    #:cl->py
-   #:py->cl))
+   #:py->cl
+   ;; Runtime error condition
+   #:py-runtime-error
+   #:py-runtime-error-class-name
+   #:py-runtime-error-message
+   #:py-raise))
 
 (in-package :clython.runtime)
+
+;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; Runtime error condition (catchable by try/except)
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(define-condition py-runtime-error (error)
+  ((class-name :initarg :class-name :reader py-runtime-error-class-name)
+   (message    :initarg :message    :reader py-runtime-error-message :initform ""))
+  (:report (lambda (c stream)
+             (let ((name (py-runtime-error-class-name c))
+                   (msg  (py-runtime-error-message c)))
+               (if (string= msg "")
+                   (format stream "~A" name)
+                   (format stream "~A: ~A" name msg)))))
+  (:documentation "Signalled by runtime operations (arithmetic, indexing, etc.)
+   when a Python-level error occurs. Caught by the try/except handler in eval."))
+
+(defun py-raise (class-name message &rest format-args)
+  "Signal a py-runtime-error with CLASS-NAME and formatted MESSAGE."
+  (error 'py-runtime-error
+         :class-name class-name
+         :message (if format-args
+                      (apply #'format nil message format-args)
+                      message)))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Base class
@@ -671,16 +700,16 @@
   (make-py-int (* (py-int-value a) (py-int-value b))))
 (defmethod py-truediv ((a py-int) (b py-int))
   (when (zerop (py-int-value b))
-    (error "ZeroDivisionError: division by zero"))
+    (py-raise "ZeroDivisionError" "division by zero"))
   (make-py-float (/ (float (py-int-value a) 1.0d0)
                     (float (py-int-value b) 1.0d0))))
 (defmethod py-floordiv ((a py-int) (b py-int))
   (when (zerop (py-int-value b))
-    (error "ZeroDivisionError: integer division or modulo by zero"))
+    (py-raise "ZeroDivisionError" "integer division or modulo by zero"))
   (make-py-int (floor (py-int-value a) (py-int-value b))))
 (defmethod py-mod ((a py-int) (b py-int))
   (when (zerop (py-int-value b))
-    (error "ZeroDivisionError: integer division or modulo by zero"))
+    (py-raise "ZeroDivisionError" "integer division or modulo by zero"))
   (make-py-int (mod (py-int-value a) (py-int-value b))))
 (defmethod py-pow ((a py-int) (b py-int))
   (make-py-int (expt (py-int-value a) (py-int-value b))))
@@ -704,11 +733,11 @@
   (make-py-float (* (py-float-value a) (py-float-value b))))
 (defmethod py-truediv ((a py-float) (b py-float))
   (when (zerop (py-float-value b))
-    (error "ZeroDivisionError: float division by zero"))
+    (py-raise "ZeroDivisionError" "float division by zero"))
   (make-py-float (/ (py-float-value a) (py-float-value b))))
 (defmethod py-floordiv ((a py-float) (b py-float))
   (when (zerop (py-float-value b))
-    (error "ZeroDivisionError: float floor division by zero"))
+    (py-raise "ZeroDivisionError" "float floor division by zero"))
   (make-py-float (ffloor (py-float-value a) (py-float-value b))))
 (defmethod py-mod ((a py-float) (b py-float))
   (make-py-float (mod (py-float-value a) (py-float-value b))))
@@ -986,14 +1015,14 @@
                                do (setf (aref vec i) (aref vec (1+ i))))
                          (decf (fill-pointer vec))
                          +py-none+)
-                       (error "ValueError: list.remove(x): x not in list"))))))
+                       (py-raise "ValueError" "list.remove(x): x not in list"))))))
         ((string= name "pop")
          (wrap (lambda (&optional idx-obj)
                  (let* ((len (length vec))
                         (idx (if idx-obj (py-int-value idx-obj) -1))
                         (i (if (< idx 0) (+ len idx) idx)))
                    (when (or (< i 0) (>= i len))
-                     (error "IndexError: pop index out of range"))
+                     (py-raise "IndexError" "pop index out of range"))
                    (let ((val (aref vec i)))
                      (loop for j from i below (1- len)
                            do (setf (aref vec j) (aref vec (1+ j))))
@@ -1008,7 +1037,7 @@
                    (loop for i from start below end
                          when (py-eq (aref vec i) item)
                            do (return (make-py-int i))
-                         finally (error "ValueError: ~A is not in list" (py-repr item)))))))
+                         finally (py-raise "ValueError" "~A is not in list" (py-repr item)))))))
         ((string= name "count")
          (wrap (lambda (item)
                  (make-py-int (count-if (lambda (x) (py-eq x item)) vec)))))
@@ -1065,7 +1094,7 @@
                      (if found
                          (progn (remhash k ht) val)
                          (if default default
-                             (error "KeyError: ~A" (py-repr key)))))))))
+                             (py-raise "KeyError" "~A" (py-repr key)))))))))
         ((string= name "setdefault")
          (wrap (lambda (key &optional default)
                  (let ((k (dict-hash-key key)))
@@ -1096,7 +1125,7 @@
         ((string= name "remove")
          (wrap (lambda (item)
                  (unless (remhash (set-hash-key item) ht)
-                   (error "KeyError: ~A" (py-repr item)))
+                   (py-raise "KeyError" "~A" (py-repr item)))
                  +py-none+)))
         ((string= name "__contains__")
          (wrap (lambda (item)
@@ -1125,8 +1154,8 @@
     (when (hash-table-p d)
       (multiple-value-bind (val found) (gethash name d)
         (when found (return-from py-getattr val)))))
-  (error "AttributeError: '~A' object has no attribute '~A'"
-         (class-name (class-of obj)) name))
+  (py-raise "AttributeError" "'~A' object has no attribute '~A'"
+            (class-name (class-of obj)) name))
 
 (defmethod py-setattr ((obj py-object) (name string) value)
   (unless (hash-table-p (py-object-dict obj))
@@ -1142,8 +1171,8 @@
 (defmethod py-getattr ((obj py-module) (name string))
   (multiple-value-bind (val found) (gethash name (py-module-dict obj))
     (if found val
-        (error "AttributeError: module '~A' has no attribute '~A'"
-               (py-module-name obj) name))))
+        (py-raise "AttributeError" "module '~A' has no attribute '~A'"
+                  (py-module-name obj) name))))
 
 (defmethod py-setattr ((obj py-module) (name string) value)
   (setf (gethash name (py-module-dict obj)) value))
@@ -1155,8 +1184,8 @@
   (cond
     ((eq idx +py-none+) default)
     ((typep idx 'py-int) (py-int-value idx))
-    (t (error "TypeError: slice indices must be integers or None, not ~A"
-              (py-type-name (py-type-of idx))))))
+    (t (py-raise "TypeError" "slice indices must be integers or None, not ~A"
+                 (py-type-name (py-type-of idx))))))
 
 (defun compute-slice-indices (slice-obj len)
   "Compute (start stop step) for a py-slice given sequence length LEN.
@@ -1167,7 +1196,7 @@
     ;; 1. Unpack step
     (let ((step (if (eq step-val +py-none+) 1 (py-int-value step-val))))
       (when (zerop step)
-        (error "ValueError: slice step cannot be zero"))
+        (py-raise "ValueError" "slice step cannot be zero"))
       ;; 2. Unpack start
       (let ((start (cond
                      ((eq start-val +py-none+)
@@ -1213,7 +1242,7 @@
          (idx (py-int-value key))
          (i   (if (< idx 0) (+ len idx) idx)))
     (if (or (< i 0) (>= i len))
-        (error "IndexError: list index out of range")
+        (py-raise "IndexError" "list index out of range")
         (aref vec i))))
 
 (defmethod py-setitem ((obj py-list) (key py-int) value)
@@ -1222,7 +1251,7 @@
          (idx (py-int-value key))
          (i   (if (< idx 0) (+ len idx) idx)))
     (if (or (< i 0) (>= i len))
-        (error "IndexError: list assignment index out of range")
+        (py-raise "IndexError" "list assignment index out of range")
         (setf (aref vec i) value))))
 
 (defmethod py-delitem ((obj py-list) (key py-int))
@@ -1231,7 +1260,7 @@
          (idx (py-int-value key))
          (i   (if (< idx 0) (+ len idx) idx)))
     (if (or (< i 0) (>= i len))
-        (error "IndexError: list assignment index out of range")
+        (py-raise "IndexError" "list assignment index out of range")
         (progn
           (loop for j from i below (1- len)
                 do (setf (aref vec j) (aref vec (1+ j))))
@@ -1248,7 +1277,7 @@
          (idx (py-int-value key))
          (i   (if (< idx 0) (+ len idx) idx)))
     (if (or (< i 0) (>= i len))
-        (error "IndexError: tuple index out of range")
+        (py-raise "IndexError" "tuple index out of range")
         (svref vec i))))
 
 (defmethod py-getitem ((obj py-tuple) (key py-slice))
@@ -1262,7 +1291,7 @@
          (idx (py-int-value key))
          (i   (if (< idx 0) (+ len idx) idx)))
     (if (or (< i 0) (>= i len))
-        (error "IndexError: string index out of range")
+        (py-raise "IndexError" "string index out of range")
         (make-py-str (string (char s i))))))
 
 (defmethod py-getitem ((obj py-str) (key py-slice))
@@ -1284,7 +1313,7 @@
 (defmethod py-getitem ((obj py-dict) key)
   (multiple-value-bind (val found) (gethash (dict-hash-key key) (py-dict-value obj))
     (unless found
-      (error "KeyError: ~A" (py-repr key)))
+      (py-raise "KeyError" "~A" (py-repr key)))
     val))
 
 (defmethod py-setitem ((obj py-dict) key value)
@@ -1292,7 +1321,7 @@
 
 (defmethod py-delitem ((obj py-dict) key)
   (unless (remhash (dict-hash-key key) (py-dict-value obj))
-    (error "KeyError: ~A" (py-repr key))))
+    (py-raise "KeyError" "~A" (py-repr key))))
 
 ;;; __len__ ----------------------------------------------------------------
 
