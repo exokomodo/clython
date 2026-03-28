@@ -186,11 +186,26 @@
     ((string= name "module")    'py-module)
     (t nil)))
 
+(defun %is-subtype-p (cls target)
+  "Check if CLS is TARGET or has TARGET as an ancestor in its bases."
+  (when (typep cls 'py-type)
+    (or (eq cls target)
+        (some (lambda (base) (%is-subtype-p base target))
+              (py-type-bases cls)))))
+
 (defbuiltin +builtin-isinstance+ "isinstance" (obj typeobj)
   (py-bool-from-cl
-   (let* ((name (py-type-name typeobj))
+   (let* ((name (cond
+                  ((typep typeobj 'py-type) (py-type-name typeobj))
+                  ((typep typeobj 'py-function) (py-function-name typeobj))
+                  (t "")))
           (cl-class (%py-type-name->cl-class name)))
-     (and cl-class (typep obj cl-class)))))
+     (if cl-class
+         (typep obj cl-class)
+         ;; Check user-defined classes with full hierarchy walk
+         (and (typep typeobj 'py-type)
+              (let ((obj-cls (py-object-class obj)))
+                (%is-subtype-p obj-cls typeobj)))))))
 
 (defbuiltin +builtin-issubclass+ "issubclass" (subtype supertype)
   ;; Simplified: compare type names

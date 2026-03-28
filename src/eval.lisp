@@ -295,6 +295,16 @@
 ;;; ─── Function/method calls ─────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:call-node) env)
+  ;; Special-case: super() with no args — needs calling env for __class__ and self
+  (let ((func-node (clython.ast:call-node-func node)))
+    (when (and (typep func-node 'clython.ast:name-node)
+               (string= (clython.ast:name-node-id func-node) "super")
+               (null (clython.ast:call-node-args node)))
+      (let ((cls (ignore-errors (clython.scope:env-get "__class__" env)))
+            (self (ignore-errors (clython.scope:env-get "self" env))))
+        (when (and cls self)
+          (return-from eval-node
+            (make-instance 'clython.runtime:py-super :type cls :obj self))))))
   (let* ((func (eval-node (clython.ast:call-node-func node) env))
          (args (mapcar (lambda (a) (eval-node a env))
                        (clython.ast:call-node-args node)))
@@ -687,7 +697,18 @@
                     (return-from for-loop nil))
                   (py-continue ()
                     (return-from for-body nil))))))
-        (clython.runtime:stop-iteration () nil)))
+        (clython.runtime:stop-iteration () nil)
+        (py-exception (e)
+          ;; Check if this is a StopIteration from user code
+          (let ((v (py-exception-value e)))
+            (unless (and (typep v 'clython.runtime:py-exception-object)
+                         (string= (clython.runtime:py-exception-class-name v)
+                                  "StopIteration"))
+              (error e))))
+        (clython.runtime:py-runtime-error (e)
+          (unless (string= (clython.runtime:py-runtime-error-class-name e)
+                           "StopIteration")
+            (error e)))))
     ;; else clause (runs if no break)
     (unless broke
       (dolist (stmt (%sort-body (clython.ast:for-node-orelse node)))
@@ -750,6 +771,14 @@
              (clython.scope:env-bindings class-env))
     ;; Create the type object
     (let ((cls (clython.runtime:make-py-type :name name :bases bases :tdict class-dict)))
+      ;; Inject __class__ into each method's closure for super() support
+      (maphash (lambda (k v)
+                 (declare (ignore k))
+                 (when (typep v 'clython.runtime:py-function)
+                   (let ((fn-env (clython.runtime:py-function-env v)))
+                     (when fn-env
+                       (clython.scope:env-set "__class__" cls fn-env)))))
+               class-dict)
       (clython.scope:env-set name cls env))
     clython.runtime:+py-none+))
 
