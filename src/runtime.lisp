@@ -141,6 +141,9 @@
    #:*exception-hierarchy*
    #:exception-is-subclass-p
 
+   ;; Kwargs passing
+   #:*current-kwargs*
+
    ;; Helpers
    #:py-object-p
    #:cl->py
@@ -256,10 +259,19 @@
   ((%value :initarg :value :accessor py-set-value))
   (:documentation "Python set (mutable)."))
 
+(defun set-hash-key (key)
+  "Unwrap a Python object to a CL value suitable for EQUAL hash-table lookup in sets."
+  (typecase key
+    (py-str   (py-str-value key))
+    (py-int   (py-int-value key))
+    (py-float (py-float-value key))
+    (py-bool  (py-bool-raw key))
+    (t        (if (eq key +py-none+) :none key))))
+
 (defun make-py-set (&optional items)
   (let ((ht (make-hash-table :test #'equal)))
     (dolist (i (or items '()))
-      (setf (gethash i ht) t))
+      (setf (gethash (set-hash-key i) ht) i))
     (make-instance 'py-set :value ht)))
 
 ;;; frozenset --------------------------------------------------------------
@@ -494,11 +506,16 @@
     (maphash (lambda (k v) (declare (ignore v)) (push k keys)) ht)
     (nreverse keys)))
 
+(defun %hash-table-values (ht)
+  (let ((vals '()))
+    (maphash (lambda (k v) (declare (ignore k)) (push v vals)) ht)
+    (nreverse vals)))
+
 (defmethod py-repr ((obj py-set))
-  (let ((keys (%hash-table-keys (py-set-value obj))))
-    (if (null keys)
+  (let ((elts (%hash-table-values (py-set-value obj))))
+    (if (null elts)
         "set()"
-        (format nil "{~{~A~^, ~}}" (mapcar #'py-repr keys)))))
+        (format nil "{~{~A~^, ~}}" (mapcar #'py-repr elts)))))
 (defmethod py-str-of ((obj py-set)) (py-repr obj))
 
 (defmethod py-repr ((obj py-frozenset))
@@ -772,6 +789,252 @@
 
 (defgeneric py-delattr (obj name)
   (:documentation "Python delattr(obj, name)."))
+
+;;; ─── String methods ─────────────────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-str) (name string))
+  "Return callable method objects for common str methods."
+  (let ((s (py-str-value obj)))
+    (flet ((wrap (fn) (make-py-function :name name :cl-fn fn)))
+      (cond
+        ((string= name "upper")
+         (wrap (lambda () (make-py-str (string-upcase s)))))
+        ((string= name "lower")
+         (wrap (lambda () (make-py-str (string-downcase s)))))
+        ((string= name "strip")
+         (wrap (lambda (&optional chars)
+                 (let ((cs (if chars (py-str-value chars) nil)))
+                   (make-py-str (string-trim (or cs '(#\Space #\Tab #\Newline #\Return)) s))))))
+        ((string= name "lstrip")
+         (wrap (lambda (&optional chars)
+                 (let ((cs (if chars (py-str-value chars) nil)))
+                   (make-py-str (string-left-trim (or cs '(#\Space #\Tab #\Newline #\Return)) s))))))
+        ((string= name "rstrip")
+         (wrap (lambda (&optional chars)
+                 (let ((cs (if chars (py-str-value chars) nil)))
+                   (make-py-str (string-right-trim (or cs '(#\Space #\Tab #\Newline #\Return)) s))))))
+        ((string= name "split")
+         (wrap (lambda (&optional sep-obj)
+                 (let ((parts
+                         (if (and sep-obj (typep sep-obj 'py-str))
+                             ;; Split by specific separator
+                             (let ((sep (py-str-value sep-obj))
+                                   (result '())
+                                   (start 0))
+                               (loop
+                                 (let ((pos (search sep s :start2 start)))
+                                   (if pos
+                                       (progn
+                                         (push (subseq s start pos) result)
+                                         (setf start (+ pos (length sep))))
+                                       (progn
+                                         (push (subseq s start) result)
+                                         (return)))))
+                               (nreverse result))
+                             ;; Split on whitespace (default)
+                             (let ((result '()) (i 0) (len (length s)))
+                               (loop while (< i len) do
+                                 ;; Skip whitespace
+                                 (loop while (and (< i len)
+                                                  (member (char s i) '(#\Space #\Tab #\Newline #\Return)))
+                                       do (incf i))
+                                 (when (>= i len) (return))
+                                 ;; Collect non-whitespace
+                                 (let ((start i))
+                                   (loop while (and (< i len)
+                                                    (not (member (char s i) '(#\Space #\Tab #\Newline #\Return))))
+                                         do (incf i))
+                                   (push (subseq s start i) result)))
+                               (nreverse result)))))
+                   (make-py-list (mapcar #'make-py-str parts))))))
+        ((string= name "join")
+         (wrap (lambda (iterable)
+                 (let ((items '())
+                       (iter (py-iter iterable)))
+                   (handler-case
+                       (loop (push (py-str-value (py-next iter)) items))
+                     (stop-iteration () nil))
+                   (make-py-str (format nil "~{~A~^~A~}"
+                                        (loop for (item . rest) on (nreverse items)
+                                              collect item
+                                              when rest collect s)))))))
+        ((string= name "replace")
+         (wrap (lambda (old new &optional count-obj)
+                 (let ((old-s (py-str-value old))
+                       (new-s (py-str-value new))
+                       (max-count (if count-obj (py-int-value count-obj) -1))
+                       (result (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t))
+                       (start 0)
+                       (replacements 0))
+                   (loop
+                     (when (and (>= max-count 0) (>= replacements max-count))
+                       (loop for i from start below (length s) do
+                         (vector-push-extend (char s i) result))
+                       (return))
+                     (let ((pos (search old-s s :start2 start)))
+                       (if pos
+                           (progn
+                             (loop for i from start below pos do
+                               (vector-push-extend (char s i) result))
+                             (loop for c across new-s do
+                               (vector-push-extend c result))
+                             (setf start (+ pos (length old-s)))
+                             (incf replacements))
+                           (progn
+                             (loop for i from start below (length s) do
+                               (vector-push-extend (char s i) result))
+                             (return)))))
+                   (make-py-str (coerce result 'string))))))
+        ((string= name "startswith")
+         (wrap (lambda (prefix) (py-bool-from-cl
+                                 (let ((p (py-str-value prefix)))
+                                   (and (>= (length s) (length p))
+                                        (string= s p :end1 (length p))))))))
+        ((string= name "endswith")
+         (wrap (lambda (suffix) (py-bool-from-cl
+                                 (let ((sf (py-str-value suffix)))
+                                   (and (>= (length s) (length sf))
+                                        (string= s sf :start1 (- (length s) (length sf)))))))))
+        ((string= name "find")
+         (wrap (lambda (sub &optional start-obj end-obj)
+                 (let* ((sub-s (py-str-value sub))
+                        (start-i (if start-obj (py-int-value start-obj) 0))
+                        (end-i (if end-obj (py-int-value end-obj) (length s)))
+                        (pos (search sub-s s :start2 start-i :end2 end-i)))
+                   (make-py-int (or pos -1))))))
+        ((string= name "count")
+         (wrap (lambda (sub)
+                 (let ((sub-s (py-str-value sub))
+                       (count 0) (start 0))
+                   (loop
+                     (let ((pos (search sub-s s :start2 start)))
+                       (if pos
+                           (progn (incf count) (setf start (+ pos (max 1 (length sub-s)))))
+                           (return (make-py-int count)))))))))
+        ((string= name "format")
+         (wrap (lambda (&rest format-args)
+                 ;; Simple positional format: "{}".format(val) or "{0}{1}".format(a, b)
+                 (let ((result (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t))
+                       (i 0) (auto-idx 0) (len (length s)))
+                   (loop while (< i len) do
+                     (if (and (char= (char s i) #\{) (< (1+ i) len))
+                         (if (char= (char s (1+ i)) #\})
+                             ;; {} — auto-numbered
+                             (progn
+                               (when (< auto-idx (length format-args))
+                                 (loop for c across (py-str-of (nth auto-idx format-args))
+                                       do (vector-push-extend c result)))
+                               (incf auto-idx)
+                               (incf i 2))
+                             ;; {N} — explicitly numbered
+                             (let ((close-pos (position #\} s :start (1+ i))))
+                               (if close-pos
+                                   (let* ((spec (subseq s (1+ i) close-pos))
+                                          (idx (ignore-errors (parse-integer spec))))
+                                     (if idx
+                                         (progn
+                                           (when (< idx (length format-args))
+                                             (loop for c across (py-str-of (nth idx format-args))
+                                                   do (vector-push-extend c result)))
+                                           (setf i (1+ close-pos)))
+                                         (progn
+                                           (vector-push-extend (char s i) result)
+                                           (incf i))))
+                                   (progn
+                                     (vector-push-extend (char s i) result)
+                                     (incf i)))))
+                         (progn
+                           (vector-push-extend (char s i) result)
+                           (incf i))))
+                   (make-py-str (coerce result 'string))))))
+        (t (call-next-method))))))
+
+;;; ─── List methods ──────────────────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-list) (name string))
+  "Return callable method objects for common list methods."
+  (let ((vec (py-list-value obj)))
+    (flet ((wrap (fn) (make-py-function :name name :cl-fn fn)))
+      (cond
+        ((string= name "append")
+         (wrap (lambda (item) (vector-push-extend item vec) +py-none+)))
+        ((string= name "extend")
+         (wrap (lambda (iterable)
+                 (let ((iter (py-iter iterable)))
+                   (handler-case
+                       (loop (vector-push-extend (py-next iter) vec))
+                     (stop-iteration () nil)))
+                 +py-none+)))
+        ((string= name "insert")
+         (wrap (lambda (idx-obj item)
+                 (let* ((len (length vec))
+                        (idx (py-int-value idx-obj))
+                        (i (max 0 (min (if (< idx 0) (+ len idx) idx) len))))
+                   ;; Extend the vector first
+                   (vector-push-extend +py-none+ vec)
+                   ;; Shift elements right
+                   (loop for j from (1- (length vec)) above i
+                         do (setf (aref vec j) (aref vec (1- j))))
+                   (setf (aref vec i) item))
+                 +py-none+)))
+        ((string= name "remove")
+         (wrap (lambda (item)
+                 (let ((pos (position-if (lambda (x) (py-eq x item)) vec)))
+                   (if pos
+                       (progn
+                         (loop for i from pos below (1- (length vec))
+                               do (setf (aref vec i) (aref vec (1+ i))))
+                         (decf (fill-pointer vec))
+                         +py-none+)
+                       (error "ValueError: list.remove(x): x not in list"))))))
+        ((string= name "pop")
+         (wrap (lambda (&optional idx-obj)
+                 (let* ((len (length vec))
+                        (idx (if idx-obj (py-int-value idx-obj) -1))
+                        (i (if (< idx 0) (+ len idx) idx)))
+                   (when (or (< i 0) (>= i len))
+                     (error "IndexError: pop index out of range"))
+                   (let ((val (aref vec i)))
+                     (loop for j from i below (1- len)
+                           do (setf (aref vec j) (aref vec (1+ j))))
+                     (decf (fill-pointer vec))
+                     val)))))
+        ((string= name "clear")
+         (wrap (lambda () (setf (fill-pointer vec) 0) +py-none+)))
+        ((string= name "index")
+         (wrap (lambda (item &optional start-obj end-obj)
+                 (let ((start (if start-obj (py-int-value start-obj) 0))
+                       (end (if end-obj (py-int-value end-obj) (length vec))))
+                   (loop for i from start below end
+                         when (py-eq (aref vec i) item)
+                           do (return (make-py-int i))
+                         finally (error "ValueError: ~A is not in list" (py-repr item)))))))
+        ((string= name "count")
+         (wrap (lambda (item)
+                 (make-py-int (count-if (lambda (x) (py-eq x item)) vec)))))
+        ((string= name "sort")
+         (wrap (lambda ()
+                 ;; Simple in-place sort using py-lt
+                 (let ((items (coerce vec 'list)))
+                   (setf items (sort items (lambda (a b) (py-lt a b))))
+                   (loop for i from 0 for item in items do (setf (aref vec i) item)))
+                 +py-none+)))
+        ((string= name "reverse")
+         (wrap (lambda ()
+                 (let ((len (length vec)))
+                   (loop for i below (floor len 2)
+                         do (rotatef (aref vec i) (aref vec (- len 1 i)))))
+                 +py-none+)))
+        ((string= name "copy")
+         (wrap (lambda ()
+                 (make-py-list (coerce vec 'list)))))
+        (t (call-next-method))))))
+
+(defmethod py-getattr ((obj py-type) (name string))
+  ;; Built-in attributes for type objects
+  (cond
+    ((string= name "__name__") (make-py-str (py-type-name obj)))
+    (t (call-next-method))))
 
 (defmethod py-getattr ((obj py-object) (name string))
   (let ((d (py-object-dict obj)))
@@ -1088,10 +1351,10 @@
   (nth-value 1 (gethash (dict-hash-key key) (py-dict-value obj))))
 
 (defmethod py-contains ((obj py-set) item)
-  (nth-value 1 (gethash item (py-set-value obj))))
+  (nth-value 1 (gethash (set-hash-key item) (py-set-value obj))))
 
 (defmethod py-contains ((obj py-frozenset) item)
-  (nth-value 1 (gethash item (py-frozenset-value obj))))
+  (nth-value 1 (gethash (set-hash-key item) (py-frozenset-value obj))))
 
 ;;; __hash__ / id ----------------------------------------------------------
 
@@ -1236,6 +1499,23 @@
         (member parent-name mro :test #'string=)
         ;; Unknown exception — only match if names are equal
         (string= child-name parent-name))))
+
+(defmethod py-getattr ((obj py-exception-object) (name string))
+  ;; Built-in attributes for exception instances
+  (cond
+    ((string= name "args")
+     (make-py-tuple (or (py-exception-args obj) '())))
+    ((string= name "__class__")
+     (make-py-type :name (py-exception-class-name obj)))
+    (t (call-next-method))))
+
+;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; Keyword argument passing for builtins
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(defvar *current-kwargs* nil
+  "Alist of (name . py-value) for keyword arguments passed to the current call.
+   Set by the evaluator before calling builtins via py-call.")
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; CL ↔ Python coercion helpers

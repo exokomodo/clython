@@ -1165,6 +1165,8 @@
 ;;; Note: base is NOT a unary expr — this ensures -2**2 == -(2**2) == -4
 
 (defrule parse-power
+  ;; Grammar: power ::= (await_expr | primary) ["**" u_expr]
+  ;; Note: base is NOT a unary expr — this ensures -2**2 == -(2**2) == -4
   (let ((base (parse-await-expr ps)))
     (when (failp base) (return-from nil +fail+))
     (let ((tok (ps-token ps)))
@@ -1395,20 +1397,76 @@
         (parse-conditional ps))))
 
 (defun parse-lambda-params (ps)
-  "Parse lambda parameters (simplified). Returns a py-arguments instance."
-  ;; For now, parse a simple comma-separated list of names
-  (let ((args '()))
+  "Parse lambda parameters with defaults, *args, **kwargs.
+   Returns a py-arguments instance."
+  (let ((args '())
+        (defaults '())
+        (vararg nil)
+        (kwonlyargs '())
+        (kw-defaults '())
+        (kwarg nil)
+        (seen-star nil))
+    ;; Empty params (next token is ':')
+    (let ((tok (ps-token ps)))
+      (when (and tok (eq (tok-type tok) :op) (string= (tok-value tok) ":"))
+        (return-from parse-lambda-params
+          (make-instance 'clython.ast:py-arguments))))
     (loop
       (let ((tok (ps-token ps)))
-        (unless (and tok (eq (tok-type tok) :name))
+        (cond
+          ;; **kwargs
+          ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "**"))
+           (ps-advance ps)
+           (let ((name-tok (ps-token ps)))
+             (when (and name-tok (eq (tok-type name-tok) :name))
+               (ps-advance ps)
+               (setf kwarg (make-instance 'clython.ast:py-arg
+                                          :arg (tok-value name-tok))))))
+          ;; *args or bare *
+          ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "*"))
+           (ps-advance ps)
+           (setf seen-star t)
+           (let ((next (ps-token ps)))
+             (when (and next (eq (tok-type next) :name))
+               (ps-advance ps)
+               (setf vararg (make-instance 'clython.ast:py-arg
+                                           :arg (tok-value next))))))
+          ;; Regular parameter
+          ((and tok (eq (tok-type tok) :name))
+           (ps-advance ps)
+           (let ((default nil))
+             ;; Optional default value
+             (let ((eq-tok (ps-token ps)))
+               (when (and eq-tok (eq (tok-type eq-tok) :op) (string= (tok-value eq-tok) "="))
+                 (ps-advance ps)
+                 (let ((d (parse-expression-internal ps)))
+                   (unless (failp d) (setf default d)))))
+             (let ((arg (make-instance 'clython.ast:py-arg :arg (tok-value tok))))
+               (if seen-star
+                   (progn
+                     (push arg kwonlyargs)
+                     (push default kw-defaults))
+                   (progn
+                     (push arg args)
+                     (when default (push default defaults)))))))
+          (t (return))))
+      ;; Comma or end
+      (let ((comma (ps-token ps)))
+        (unless (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
           (return))
-        (ps-advance ps)
-        (push (make-instance 'clython.ast:py-arg :arg (tok-value tok)) args)
-        (let ((comma (ps-token ps)))
-          (unless (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
-            (return))
-          (ps-advance ps))))
-    (make-instance 'clython.ast:py-arguments :args (nreverse args))))
+        (ps-advance ps))
+      ;; Check for colon (end of lambda params)
+      (let ((colon-check (ps-token ps)))
+        (when (and colon-check (eq (tok-type colon-check) :op)
+                   (string= (tok-value colon-check) ":"))
+          (return))))
+    (make-instance 'clython.ast:py-arguments
+                   :args (nreverse args)
+                   :vararg vararg
+                   :kwonlyargs (nreverse kwonlyargs)
+                   :kw-defaults (nreverse kw-defaults)
+                   :kwarg kwarg
+                   :defaults (nreverse defaults))))
 
 ;;; --- Named expression (:=) ---
 
@@ -1808,13 +1866,47 @@
 
 ;;; --- Assignment or expression statement ---
 
+(defun %parse-comma-list (ps first-expr &key (ctx :load))
+  "After parsing first-expr, check for commas to build a tuple.
+   Returns first-expr if no comma follows, or a tuple-node if commas found."
+  (let ((tok (ps-token ps)))
+    (if (and tok (eq (tok-type tok) :op) (string= (tok-value tok) ","))
+        (let ((elts (list first-expr)))
+          (loop
+            (let ((comma (ps-token ps)))
+              (unless (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+                (return))
+              (ps-advance ps)
+              ;; Check for trailing comma (before =, newline, end, or augmented ops)
+              (let ((peek (ps-token ps)))
+                (when (or (null peek)
+                          (eq (tok-type peek) :newline)
+                          (and (eq (tok-type peek) :op)
+                               (member (tok-value peek)
+                                       '("=" "+=" "-=" "*=" "/=" "//=" "%=" "**="
+                                         ">>=" "<<=" "&=" "^=" "|=" "@=" ":" ")")
+                                       :test #'string=)))
+                  (return)))
+              (let ((e (parse-star-expr-or-expr ps)))
+                (when (failp e) (return))
+                (push e elts))))
+          (if (= (length elts) 1)
+              first-expr
+              (make-node 'clython.ast:tuple-node
+                         :elts (nreverse elts) :ctx ctx
+                         :line (clython.ast:node-line first-expr)
+                         :col (clython.ast:node-col first-expr))))
+        first-expr)))
+
 (defrule parse-assignment-or-expr
   ;; This handles: expr_stmt | assignment | aug_assign | ann_assign
   (let ((saved (ps-save ps))
         (first-expr (parse-star-expr-or-expr ps)))
     (when (failp first-expr)
       (return-from nil +fail+))
-    (let ((tok (ps-token ps)))
+    ;; Check for comma -> tuple target/expression before looking at = or augmented op
+    (let* ((target-or-expr (%parse-comma-list ps first-expr :ctx :store))
+           (tok (ps-token ps)))
       (cond
         ;; Augmented assignment: +=, -=, *=, etc.
         ((and tok (eq (tok-type tok) :op)
@@ -1826,14 +1918,14 @@
              (if (failp value)
                  (progn (ps-restore ps saved) +fail+)
                  (make-node 'clython.ast:aug-assign-node
-                            :target first-expr
+                            :target target-or-expr
                             :op (aug-assign-op op-str)
                             :value value
                             :line (clython.ast:node-line first-expr)
                             :col (clython.ast:node-col first-expr))))))
         ;; Simple assignment: =
         ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "="))
-         (let ((targets (list first-expr))
+         (let ((targets (list target-or-expr))
                (final-value nil))
            ;; Handle chained assignment: a = b = c = expr
            (loop
@@ -1841,8 +1933,10 @@
                (unless (and eq-tok (eq (tok-type eq-tok) :op) (string= (tok-value eq-tok) "="))
                  (return))
                (ps-advance ps)
-               (let ((next (parse-star-expr-or-expr ps)))
+               ;; Parse value, then check for comma list (tuple on RHS)
+               (let* ((next (parse-star-expr-or-expr ps)))
                  (when (failp next) (return))
+                 (setf next (%parse-comma-list ps next :ctx :load))
                  ;; Check if there's another = after this
                  (let ((peek (ps-token ps)))
                    (if (and peek (eq (tok-type peek) :op) (string= (tok-value peek) "="))
@@ -1877,10 +1971,10 @@
                         :simple (if (typep first-expr 'clython.ast:name-node) 1 0)
                         :line (clython.ast:node-line first-expr)
                         :col (clython.ast:node-col first-expr)))))
-        ;; Expression statement
+        ;; Expression statement (target-or-expr may be a tuple from comma expression)
         (t
          (make-node 'clython.ast:expr-stmt-node
-                    :value first-expr
+                    :value target-or-expr
                     :line (clython.ast:node-line first-expr)
                     :col (clython.ast:node-col first-expr)))))))
 

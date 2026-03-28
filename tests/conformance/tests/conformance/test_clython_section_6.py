@@ -581,3 +581,130 @@ class TestSection615ExpressionLists:
     def test_swap(self):
         out, _, rc = clython_run("a, b = 1, 2\na, b = b, a\nprint(a, b)")
         assert rc == 0 and out == "2 1"
+
+
+# ── Extended string method tests ─────────────────────────────────────────────
+
+
+class TestSection63StringMethodsExtended:
+    """Extended string method dispatch tests."""
+
+    def test_string_method_lower(self):
+        out, _, rc = clython_run("print('HELLO'.lower())")
+        assert rc == 0 and out == "hello"
+
+    def test_string_method_strip(self):
+        out, _, rc = clython_run("print('  hello  '.strip())")
+        assert rc == 0 and out == "hello"
+
+    def test_string_method_split(self):
+        out, _, rc = clython_run("print('a,b,c'.split(','))")
+        assert rc == 0 and out == "['a', 'b', 'c']"
+
+    def test_string_method_join(self):
+        out, _, rc = clython_run("print('-'.join(['a', 'b', 'c']))")
+        assert rc == 0 and out == "a-b-c"
+
+    def test_string_method_replace(self):
+        out, _, rc = clython_run("print('hello world'.replace('world', 'python'))")
+        assert rc == 0 and out == "hello python"
+
+    def test_string_method_startswith(self):
+        out, _, rc = clython_run("print('hello'.startswith('hel'))")
+        assert rc == 0 and out == "True"
+
+    def test_string_method_endswith(self):
+        out, _, rc = clython_run("print('hello'.endswith('llo'))")
+        assert rc == 0 and out == "True"
+
+    def test_string_method_find(self):
+        out, _, rc = clython_run("print('hello'.find('ll'))")
+        assert rc == 0 and out == "2"
+
+    def test_string_method_count(self):
+        out, _, rc = clython_run("print('banana'.count('a'))")
+        assert rc == 0 and out == "3"
+
+    def test_string_method_format(self):
+        out, _, rc = clython_run("print('hi {}'.format('world'))")
+        assert rc == 0 and out == "hi world"
+
+    def test_string_method_upper(self):
+        out, _, rc = clython_run("print('hello'.upper())")
+        assert rc == 0 and out == "HELLO"
+
+
+# ── Extended list method tests ───────────────────────────────────────────────
+
+
+class TestSection63ListMethodsExtended:
+    """Extended list method dispatch tests."""
+
+    def test_list_method_pop(self):
+        out, _, rc = clython_run("x = [1, 2, 3]\nprint(x.pop())")
+        assert rc == 0 and out == "3"
+
+    def test_list_method_reverse(self):
+        out, _, rc = clython_run("x = [1, 2, 3]\nx.reverse()\nprint(x)")
+        assert rc == 0 and out == "[3, 2, 1]"
+
+    def test_list_method_sort(self):
+        out, _, rc = clython_run("x = [3, 1, 2]\nx.sort()\nprint(x)")
+        assert rc == 0 and out == "[1, 2, 3]"
+
+    def test_list_method_count(self):
+        out, _, rc = clython_run("print([1, 2, 2, 3].count(2))")
+        assert rc == 0 and out == "2"
+
+    def test_list_method_copy(self):
+        out, _, rc = clython_run("x = [1, 2]\ny = x.copy()\ny.append(3)\nprint(x, y)")
+        assert rc == 0 and out == "[1, 2] [1, 2, 3]"
+
+
+# ── Extended keyword argument tests ─────────────────────────────────────────
+
+
+class TestSection63KwargsExtended:
+    """Extended keyword argument tests."""
+
+    def test_keyword_argument_print_end(self):
+        out, _, rc = clython_run("print('hello', end='!')\nprint('world')")
+        assert rc == 0 and out == "hello!world"
+
+    def test_keyword_argument_print_sep_and_end(self):
+        out, _, rc = clython_run("print('a', 'b', sep='-', end='\\n')")
+        assert rc == 0 and out == "a-b"
+
+
+# ── Extended lambda default tests ───────────────────────────────────────────
+
+
+class TestSection614LambdaDefaultsExtended:
+    """Extended lambda default argument tests."""
+
+    def test_lambda_multiple_defaults(self):
+        out, _, rc = clython_run("f = lambda x=1, y=2, z=3: x + y + z\nprint(f())")
+        assert rc == 0 and out == "6"
+
+    def test_lambda_default_override(self):
+        out, _, rc = clython_run("f = lambda x, y=10: x * y\nprint(f(3, 5))")
+        assert rc == 0 and out == "15"
+
+
+# ── Extended tuple tests ────────────────────────────────────────────────────
+
+
+class TestSection615TupleExtended:
+    """Extended tuple packing/unpacking tests."""
+
+    def test_tuple_packing_two(self):
+        out, _, rc = clython_run("x = 1, 2\nprint(x)")
+        assert rc == 0 and out == "(1, 2)"
+
+    def test_tuple_unpacking_list(self):
+        out, _, rc = clython_run("a, b = [10, 20]\nprint(a, b)")
+        assert rc == 0 and out == "10 20"
+
+    def test_swap_strings(self):
+        out, _, rc = clython_run("a, b = 'x', 'y'\na, b = b, a\nprint(a, b)")
+        assert rc == 0 and out == "y x"
