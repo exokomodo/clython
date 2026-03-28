@@ -127,6 +127,14 @@
    #:py-hash
    #:py-id
    #:py-type-of
+   ;; Exception objects
+   #:py-exception-object
+   #:py-exception-class-name
+   #:py-exception-args
+   #:py-exception-message
+   #:make-py-exception-object
+   #:*exception-hierarchy*
+   #:exception-is-subclass-p
 
    ;; Helpers
    #:py-object-p
@@ -581,11 +589,17 @@
 (defmethod py-mul ((a py-int) (b py-int))
   (make-py-int (* (py-int-value a) (py-int-value b))))
 (defmethod py-truediv ((a py-int) (b py-int))
+  (when (zerop (py-int-value b))
+    (error "ZeroDivisionError: division by zero"))
   (make-py-float (/ (float (py-int-value a) 1.0d0)
                     (float (py-int-value b) 1.0d0))))
 (defmethod py-floordiv ((a py-int) (b py-int))
+  (when (zerop (py-int-value b))
+    (error "ZeroDivisionError: integer division or modulo by zero"))
   (make-py-int (floor (py-int-value a) (py-int-value b))))
 (defmethod py-mod ((a py-int) (b py-int))
+  (when (zerop (py-int-value b))
+    (error "ZeroDivisionError: integer division or modulo by zero"))
   (make-py-int (mod (py-int-value a) (py-int-value b))))
 (defmethod py-pow ((a py-int) (b py-int))
   (make-py-int (expt (py-int-value a) (py-int-value b))))
@@ -608,8 +622,12 @@
 (defmethod py-mul ((a py-float) (b py-float))
   (make-py-float (* (py-float-value a) (py-float-value b))))
 (defmethod py-truediv ((a py-float) (b py-float))
+  (when (zerop (py-float-value b))
+    (error "ZeroDivisionError: float division by zero"))
   (make-py-float (/ (py-float-value a) (py-float-value b))))
 (defmethod py-floordiv ((a py-float) (b py-float))
+  (when (zerop (py-float-value b))
+    (error "ZeroDivisionError: float floor division by zero"))
   (make-py-float (ffloor (py-float-value a) (py-float-value b))))
 (defmethod py-mod ((a py-float) (b py-float))
   (make-py-float (mod (py-float-value a) (py-float-value b))))
@@ -991,6 +1009,106 @@
 (defmethod py-type-of ((obj py-iterator))  "iterator")
 (defmethod py-type-of ((obj py-range))     "range")
 (defmethod py-type-of ((obj py-object))    (string (class-name (class-of obj))))
+
+;;;; ═══════════════════════════════════════════════════════════════════════════
+;;;; Exception objects — runtime representation of Python exceptions
+;;;; ═══════════════════════════════════════════════════════════════════════════
+
+(defclass py-exception-object (py-object)
+  ((class-name :initarg :class-name :accessor py-exception-class-name
+               :initform "Exception"
+               :documentation "Python exception class name (e.g. \"ValueError\")")
+   (args       :initarg :args :accessor py-exception-args
+               :initform nil
+               :documentation "Exception arguments (list of py-objects)")
+   (message    :initarg :message :accessor py-exception-message
+               :initform ""
+               :documentation "Human-readable message string"))
+  (:documentation "Runtime representation of a Python exception instance."))
+
+(defun make-py-exception-object (class-name &optional args)
+  "Create a py-exception-object with CLASS-NAME and ARGS."
+  (let ((msg (if (and args (typep (first args) 'py-str))
+                 (py-str-value (first args))
+                 (if args (py-str-of (first args)) ""))))
+    (make-instance 'py-exception-object
+                   :class-name class-name
+                   :args args
+                   :message msg)))
+
+(defmethod py-repr ((obj py-exception-object))
+  (let ((msg (py-exception-message obj)))
+    (if (string= msg "")
+        (format nil "~A()" (py-exception-class-name obj))
+        (format nil "~A('~A')" (py-exception-class-name obj) msg))))
+
+(defmethod py-str-of ((obj py-exception-object))
+  (py-exception-message obj))
+
+(defmethod py-type-of ((obj py-exception-object))
+  (py-exception-class-name obj))
+
+;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; Exception hierarchy — parent mapping for isinstance/except checks
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(defvar *exception-hierarchy* (make-hash-table :test #'equal)
+  "Maps exception class name → list of parent class names (MRO-like).")
+
+(defun %register-exception-hierarchy ()
+  "Populate the exception inheritance chain."
+  (let ((tree
+         ;; (child . parents) — parents listed from immediate to root
+         '(("BaseException"         . ())
+           ("Exception"             . ("BaseException"))
+           ("ArithmeticError"       . ("Exception" "BaseException"))
+           ("ZeroDivisionError"     . ("ArithmeticError" "Exception" "BaseException"))
+           ("OverflowError"         . ("ArithmeticError" "Exception" "BaseException"))
+           ("FloatingPointError"    . ("ArithmeticError" "Exception" "BaseException"))
+           ("AssertionError"        . ("Exception" "BaseException"))
+           ("AttributeError"       . ("Exception" "BaseException"))
+           ("EOFError"             . ("Exception" "BaseException"))
+           ("ImportError"          . ("Exception" "BaseException"))
+           ("ModuleNotFoundError"  . ("ImportError" "Exception" "BaseException"))
+           ("LookupError"          . ("Exception" "BaseException"))
+           ("IndexError"           . ("LookupError" "Exception" "BaseException"))
+           ("KeyError"             . ("LookupError" "Exception" "BaseException"))
+           ("NameError"            . ("Exception" "BaseException"))
+           ("UnboundLocalError"    . ("NameError" "Exception" "BaseException"))
+           ("OSError"              . ("Exception" "BaseException"))
+           ("FileNotFoundError"    . ("OSError" "Exception" "BaseException"))
+           ("PermissionError"      . ("OSError" "Exception" "BaseException"))
+           ("FileExistsError"      . ("OSError" "Exception" "BaseException"))
+           ("IsADirectoryError"    . ("OSError" "Exception" "BaseException"))
+           ("NotADirectoryError"   . ("OSError" "Exception" "BaseException"))
+           ("RuntimeError"         . ("Exception" "BaseException"))
+           ("RecursionError"       . ("RuntimeError" "Exception" "BaseException"))
+           ("NotImplementedError"  . ("RuntimeError" "Exception" "BaseException"))
+           ("StopIteration"        . ("Exception" "BaseException"))
+           ("StopAsyncIteration"   . ("Exception" "BaseException"))
+           ("SyntaxError"          . ("Exception" "BaseException"))
+           ("IndentationError"     . ("SyntaxError" "Exception" "BaseException"))
+           ("TabError"             . ("IndentationError" "SyntaxError" "Exception" "BaseException"))
+           ("TypeError"            . ("Exception" "BaseException"))
+           ("ValueError"           . ("Exception" "BaseException"))
+           ("UnicodeError"         . ("ValueError" "Exception" "BaseException"))
+           ("KeyboardInterrupt"    . ("BaseException"))
+           ("SystemExit"           . ("BaseException"))
+           ("GeneratorExit"        . ("BaseException")))))
+    (dolist (entry tree)
+      ;; Each class maps to itself + all its parents
+      (setf (gethash (car entry) *exception-hierarchy*)
+            (cons (car entry) (cdr entry))))))
+
+(%register-exception-hierarchy)
+
+(defun exception-is-subclass-p (child-name parent-name)
+  "Return T if CHILD-NAME is the same as or a subclass of PARENT-NAME."
+  (let ((mro (gethash child-name *exception-hierarchy*)))
+    (if mro
+        (member parent-name mro :test #'string=)
+        ;; Unknown exception — only match if names are equal
+        (string= child-name parent-name))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; CL ↔ Python coercion helpers

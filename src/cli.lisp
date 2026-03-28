@@ -20,6 +20,9 @@
          (uiop:quit 2))
        (handler-case
            (clython:py-eval (second args))
+         (division-by-zero ()
+           (format *error-output* "ZeroDivisionError: division by zero~%")
+           (uiop:quit 1))
          (error (e)
            (format *error-output* "~A~%" e)
            (uiop:quit 1))))
