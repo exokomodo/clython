@@ -845,7 +845,6 @@ class TestSection87ClassDefinitionsExtended:
         )
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="@staticmethod may not be implemented")
     def test_static_method(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -855,8 +854,6 @@ class TestSection87ClassDefinitionsExtended:
             "print(C.add(2, 3))"
         )
         assert rc == 0 and out == "5"
-
-    @pytest.mark.xfail(reason="@classmethod may not be implemented")
     def test_class_method(self):
         out, _, rc = clython_run(
             "class C:\n"

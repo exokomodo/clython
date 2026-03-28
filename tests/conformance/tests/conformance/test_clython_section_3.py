@@ -525,7 +525,6 @@ class TestSection33DescriptorProtocol:
 class TestSection33MethodTypes:
     """classmethod and staticmethod."""
 
-    @pytest.mark.xfail(reason="@classmethod may not be implemented")
     def test_classmethod(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -537,7 +536,6 @@ class TestSection33MethodTypes:
         )
         assert rc == 0 and out == "2"
 
-    @pytest.mark.xfail(reason="@staticmethod may not be implemented")
     def test_staticmethod(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -552,7 +550,6 @@ class TestSection33MethodTypes:
 class TestSection33PropertyDecorator:
     """@property decorator."""
 
-    @pytest.mark.xfail(reason="@property may not be implemented")
     def test_property_getter(self):
         out, _, rc = clython_run(
             "class C:\n"
@@ -565,7 +562,6 @@ class TestSection33PropertyDecorator:
         )
         assert rc == 0 and out == "42"
 
-    @pytest.mark.xfail(reason="@property setter may not be implemented")
     def test_property_setter(self):
         out, _, rc = clython_run(
             "class C:\n"

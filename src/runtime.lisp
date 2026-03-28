@@ -26,6 +26,13 @@
    #:py-frozenset
    #:py-function
    #:py-method
+   #:py-staticmethod-wrapper
+   #:py-staticmethod-function
+   #:py-classmethod-wrapper
+   #:py-classmethod-function
+   #:py-property-wrapper
+   #:py-property-fget
+   #:py-property-fset
    #:py-super
    #:make-py-super
    #:py-super-type
@@ -384,6 +391,20 @@
 
 (defun make-py-method (fn self)
   (make-instance 'py-method :function fn :self self))
+
+;;; staticmethod / classmethod / property wrappers -------------------------
+(defclass py-staticmethod-wrapper (py-object)
+  ((%function :initarg :function :accessor py-staticmethod-function))
+  (:documentation "Python staticmethod descriptor."))
+
+(defclass py-classmethod-wrapper (py-object)
+  ((%function :initarg :function :accessor py-classmethod-function))
+  (:documentation "Python classmethod descriptor."))
+
+(defclass py-property-wrapper (py-object)
+  ((%fget :initarg :fget :accessor py-property-fget :initform nil)
+   (%fset :initarg :fset :accessor py-property-fset :initform nil))
+  (:documentation "Python property descriptor."))
 
 ;;; type -------------------------------------------------------------------
 (defclass py-type (py-object)
@@ -1216,6 +1237,22 @@
 (defgeneric py-delattr (obj name)
   (:documentation "Python delattr(obj, name)."))
 
+;;; ─── Property descriptor methods ────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-property-wrapper) (name string))
+  (cond
+    ((string= name "setter")
+     ;; Return a callable that creates a new property with the same fget and the given fset
+     (make-py-function
+      :name "property.setter"
+      :cl-fn (lambda (&rest args)
+               (make-instance 'py-property-wrapper
+                              :fget (py-property-fget obj)
+                              :fset (first args)))))
+    ((string= name "fget") (or (py-property-fget obj) +py-none+))
+    ((string= name "fset") (or (py-property-fset obj) +py-none+))
+    (t (call-next-method))))
+
 ;;; ─── String methods ─────────────────────────────────────────────────────────
 
 (defmethod py-getattr ((obj py-str) (name string))
@@ -1601,7 +1638,14 @@
     (t
      ;; Check the type's own dict and parent classes
      (multiple-value-bind (val found) (%lookup-in-class-hierarchy obj name)
-       (when found (return-from py-getattr val)))
+       (when found
+         (cond
+           ((typep val 'py-staticmethod-wrapper)
+            (return-from py-getattr (py-staticmethod-function val)))
+           ((typep val 'py-classmethod-wrapper)
+            (return-from py-getattr
+              (make-instance 'py-method :function (py-classmethod-function val) :self obj)))
+           (t (return-from py-getattr val)))))
      (call-next-method))))
 
 (defmethod py-setattr ((obj py-type) (name string) value)
@@ -1622,17 +1666,40 @@
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
       (when found
-        ;; If it's a function, return a bound method
-        (if (typep val 'py-function)
-            (return-from py-getattr
-              (make-instance 'py-method :function val :self obj))
-            (return-from py-getattr val)))))
+        (cond
+          ;; @staticmethod — return unwrapped function (no self binding)
+          ((typep val 'py-staticmethod-wrapper)
+           (return-from py-getattr (py-staticmethod-function val)))
+          ;; @classmethod — bind the class, not the instance
+          ((typep val 'py-classmethod-wrapper)
+           (return-from py-getattr
+             (make-instance 'py-method :function (py-classmethod-function val) :self cls)))
+          ;; @property — call the getter
+          ((typep val 'py-property-wrapper)
+           (let ((fget (py-property-fget val)))
+             (if fget
+                 (return-from py-getattr (py-call fget obj))
+                 (py-raise "AttributeError" "unreadable attribute"))))
+          ;; Regular function — return a bound method
+          ((typep val 'py-function)
+           (return-from py-getattr
+             (make-instance 'py-method :function val :self obj)))
+          ;; Anything else (class attributes, etc.)
+          (t (return-from py-getattr val))))))
   (py-raise "AttributeError" "'~A' object has no attribute '~A'"
             (let ((cls (py-object-class obj)))
               (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))
             name))
 
 (defmethod py-setattr ((obj py-object) (name string) value)
+  ;; Check for @property setter in class hierarchy
+  (let ((cls (py-object-class obj)))
+    (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
+      (when (and found (typep val 'py-property-wrapper))
+        (let ((fset (py-property-fset val)))
+          (if fset
+              (progn (py-call fset obj value) (return-from py-setattr +py-none+))
+              (py-raise "AttributeError" "can't set attribute"))))))
   (unless (hash-table-p (py-object-dict obj))
     (setf (py-object-dict obj) (make-hash-table :test #'equal)))
   (setf (gethash name (py-object-dict obj)) value))

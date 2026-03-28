@@ -54,7 +54,10 @@
    #:+builtin-getattr+
    #:+builtin-setattr+
    #:+builtin-hasattr+
-   #:+builtin-delattr+))
+   #:+builtin-delattr+
+   #:+builtin-staticmethod+
+   #:+builtin-classmethod+
+   #:+builtin-property+))
 
 (in-package :clython.builtins)
 
@@ -483,6 +486,19 @@
   (py-delattr obj (py-str-value name))
   +py-none+)
 
+;;; staticmethod / classmethod / property
+
+(defbuiltin +builtin-staticmethod+ "staticmethod" (func)
+  (make-instance 'py-staticmethod-wrapper :function func))
+
+(defbuiltin +builtin-classmethod+ "classmethod" (func)
+  (make-instance 'py-classmethod-wrapper :function func))
+
+(defbuiltin +builtin-property+ "property" (&rest args)
+  (make-instance 'py-property-wrapper
+                 :fget (if (>= (length args) 1) (first args) nil)
+                 :fset (if (>= (length args) 2) (second args) nil)))
+
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Global builtins table
 ;;;; ─────────────────────────────────────────────────────────────────────────
@@ -534,7 +550,10 @@
                (cons "getattr"      +builtin-getattr+)
                (cons "setattr"      +builtin-setattr+)
                (cons "hasattr"      +builtin-hasattr+)
-               (cons "delattr"      +builtin-delattr+))))
+               (cons "delattr"      +builtin-delattr+)
+               (cons "staticmethod" +builtin-staticmethod+)
+               (cons "classmethod"  +builtin-classmethod+)
+               (cons "property"     +builtin-property+))))
     (dolist (pair pairs)
       (setf (gethash (car pair) *builtins*) (cdr pair)))))
 
