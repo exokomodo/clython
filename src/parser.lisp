@@ -2641,6 +2641,12 @@
       (tagbody
        :next-stmt
         (skip-newlines ps)
+        ;; At module level, skip stray DEDENT tokens (from blank lines after
+        ;; indented blocks — the lexer emits NEWLINE + DEDENT for these)
+        (loop while (let ((tok (ps-token ps)))
+                      (and tok (eq (tok-type tok) :dedent)))
+              do (ps-advance ps))
+        (skip-newlines ps)
         (let ((tok (ps-token ps)))
           (when (or (null tok) (eq (tok-type tok) :endmarker))
             (return-from module-loop)))

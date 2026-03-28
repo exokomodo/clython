@@ -33,6 +33,7 @@
    #:py-type
    #:py-module
    #:py-iterator
+   #:py-generator
    #:py-range
    #:py-slice
 
@@ -60,6 +61,13 @@
    #:py-module-name
    #:py-module-dict
    #:py-iterator-next-fn
+   #:py-generator-mutex
+   #:py-generator-caller-queue
+   #:py-generator-gen-queue
+   #:py-generator-value
+   #:py-generator-sent-value
+   #:py-generator-finished
+   #:py-generator-thread
    #:py-range-start
    #:py-range-stop
    #:py-range-step
@@ -93,6 +101,8 @@
    #:make-py-type
    #:make-py-module
    #:make-py-iterator
+   #:make-py-generator
+   #:py-generator-send
    #:make-py-range
    #:make-py-slice
 
@@ -395,6 +405,80 @@
   "THUNK is called with no args; return the next py-object or signal
    StopIteration by signalling a condition named 'stop-iteration'."
   (make-instance 'py-iterator :next-fn thunk))
+
+;;; generator --------------------------------------------------------------
+(defclass py-generator (py-object)
+  ((%mutex        :accessor py-generator-mutex)
+   (%caller-queue :accessor py-generator-caller-queue)
+   (%gen-queue    :accessor py-generator-gen-queue)
+   (%value        :accessor py-generator-value        :initform nil)
+   (%sent-value   :accessor py-generator-sent-value   :initform nil)
+   (%state        :accessor py-generator-state        :initform :created)  ; :created :yielded :running :finished
+   (%finished     :accessor py-generator-finished     :initform nil)
+   (%thread       :accessor py-generator-thread       :initform nil))
+  (:documentation "Python generator object backed by a thread."))
+
+(defun make-py-generator (body-fn)
+  "Create a generator. BODY-FN is a function of one argument (a yield-fn).
+   The yield-fn takes (value) and suspends the generator, returning the sent value."
+  (let* ((mutex (sb-thread:make-mutex :name "generator-mutex"))
+         (caller-queue (sb-thread:make-waitqueue :name "generator-caller"))
+         (gen-queue (sb-thread:make-waitqueue :name "generator-gen"))
+         (gen (make-instance 'py-generator)))
+    (setf (py-generator-mutex gen) mutex
+          (py-generator-caller-queue gen) caller-queue
+          (py-generator-gen-queue gen) gen-queue)
+    (let ((thread
+            (sb-thread:make-thread
+             (lambda ()
+               (sb-thread:with-mutex (mutex)
+                 ;; Wait until first next() call
+                 (loop until (eq (py-generator-state gen) :running)
+                       do (sb-thread:condition-wait gen-queue mutex))
+                 (unwind-protect
+                      (progn
+                        (funcall body-fn
+                                 (lambda (value)
+                                   ;; yield: store value, notify caller, wait for resume
+                                   (setf (py-generator-value gen) value
+                                         (py-generator-state gen) :yielded)
+                                   (sb-thread:condition-notify caller-queue)
+                                   ;; Wait until next()/send() resumes us
+                                   (loop until (eq (py-generator-state gen) :running)
+                                         do (sb-thread:condition-wait gen-queue mutex))
+                                   ;; Return the sent value
+                                   (let ((sent (py-generator-sent-value gen)))
+                                     (setf (py-generator-sent-value gen) nil)
+                                     (if (eq sent :next-signal)
+                                         +py-none+
+                                         sent)))))
+                   ;; Generator body completed (returned or errored) => finished
+                   (setf (py-generator-finished gen) t
+                         (py-generator-state gen) :finished)
+                   (sb-thread:condition-notify caller-queue))))
+             :name "clython-generator")))
+      (setf (py-generator-thread gen) thread)
+      gen)))
+
+(defun py-generator-send (gen value)
+  "Send a value to the generator and get the next yielded value.
+   Signal stop-iteration when generator is exhausted."
+  (when (py-generator-finished gen)
+    (error 'stop-iteration))
+  (sb-thread:with-mutex ((py-generator-mutex gen))
+    ;; Tell generator to run with this sent value
+    (setf (py-generator-sent-value gen) value
+          (py-generator-state gen) :running)
+    (sb-thread:condition-notify (py-generator-gen-queue gen))
+    ;; Wait for the generator to yield or finish
+    (loop until (member (py-generator-state gen) '(:yielded :finished))
+          do (sb-thread:condition-wait (py-generator-caller-queue gen)
+                                       (py-generator-mutex gen)))
+    (if (py-generator-finished gen)
+        (error 'stop-iteration)
+        (let ((val (py-generator-value gen)))
+          (setf (py-generator-value gen) nil)
+          val))))
 
 ;;; range ------------------------------------------------------------------
 (defclass py-range (py-object)
