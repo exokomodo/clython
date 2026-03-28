@@ -341,20 +341,26 @@
         +fail+)))
 
 ;; Concatenated strings: multiple adjacent STRING tokens
+;; Each part keeps its raw token value; concatenation happens at eval time
+;; by unquoting each part individually. For single strings, the raw value
+;; is kept as-is. For adjacent strings, we store a special marker list.
 (defrule parse-strings
   (let ((first (parse-string-literal ps)))
     (if (failp first)
         +fail+
         ;; Check for more adjacent strings
-        (let ((parts (list (clython.ast:constant-node-value first))))
+        (let ((rest-parts nil))
           (loop
             (let ((next (parse-string-literal ps)))
               (when (failp next) (return))
-              (push (clython.ast:constant-node-value next) parts)))
-          (if (= (length parts) 1)
+              (push (clython.ast:constant-node-value next) rest-parts)))
+          (if (null rest-parts)
               first
+              ;; Store all parts as a list so eval can unquote each individually
               (make-node 'clython.ast:constant-node
-                         :value (apply #'concatenate 'string (nreverse parts))
+                         :value (cons :concat-strings
+                                      (cons (clython.ast:constant-node-value first)
+                                            (nreverse rest-parts)))
                          :line (clython.ast:node-line first)
                          :col (clython.ast:node-col first)))))))
 

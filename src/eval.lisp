@@ -97,13 +97,16 @@
 
 (defun %unquote-string (s)
   "Strip quotes and string prefix from a Python string literal token value.
-   E.g. \"hello\" → hello, 'hi' → hi, r\"raw\" → raw, \"\"\"triple\"\"\" → triple"
+   E.g. \"hello\" → hello, 'hi' → hi, r\"raw\" → raw, \"\"\"triple\"\"\" → triple
+   Handles raw strings (r prefix) by skipping escape processing."
   (let ((start 0)
-        (len (length s)))
+        (len (length s))
+        (raw-p nil))
     ;; Skip prefix characters (b, r, u, f, B, R, U, F)
     (loop while (and (< start len)
                      (find (char s start) "brufBRUF"))
-          do (incf start))
+          do (when (find (char s start) "rR") (setf raw-p t))
+             (incf start))
     ;; Now determine quote style
     (when (< start len)
       (let ((qc (char s start)))
@@ -116,8 +119,8 @@
               (setf s (subseq s (+ start 3) (- len 3)))
               ;; Single-quoted: strip 1 char from each end
               (setf s (subseq s (+ start 1) (- len 1)))))))
-    ;; Process escape sequences
-    (%process-escapes s)))
+    ;; Process escape sequences (skip for raw strings)
+    (if raw-p s (%process-escapes s))))
 
 (defun %process-escapes (s)
   "Process Python escape sequences in a string."
@@ -161,6 +164,11 @@
       ((floatp val)      (clython.runtime:make-py-float (coerce val 'double-float)))
       ((complexp val)    (clython.runtime:make-py-complex val))
       ((stringp val)     (clython.runtime:make-py-str (%unquote-string val)))
+      ;; Adjacent string concatenation: (:concat-strings "part1" "part2" ...)
+      ((and (consp val) (eq (car val) :concat-strings))
+       (clython.runtime:make-py-str
+        (apply #'concatenate 'string
+               (mapcar #'%unquote-string (cdr val)))))
       (t (error "Unknown constant value: ~S" val)))))
 
 (defmethod eval-node ((node clython.ast:name-node) env)
