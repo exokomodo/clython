@@ -53,6 +53,7 @@
    #:py-function-body
    #:py-function-env
    #:py-function-cl-fn
+   #:py-function-generator
    #:py-method-function
    #:py-method-self
    #:py-type-name
@@ -330,20 +331,22 @@
 
 ;;; function ---------------------------------------------------------------
 (defclass py-function (py-object)
-  ((%name   :initarg :name   :accessor py-function-name   :initform "<lambda>")
-   (%params :initarg :params :accessor py-function-params :initform '())
-   (%body   :initarg :body   :accessor py-function-body   :initform nil)
-   (%env    :initarg :env    :accessor py-function-env    :initform nil)
-   (%cl-fn  :initarg :cl-fn  :accessor py-function-cl-fn  :initform nil))
+  ((%name      :initarg :name      :accessor py-function-name      :initform "<lambda>")
+   (%params    :initarg :params    :accessor py-function-params    :initform '())
+   (%body      :initarg :body      :accessor py-function-body      :initform nil)
+   (%env       :initarg :env       :accessor py-function-env       :initform nil)
+   (%cl-fn     :initarg :cl-fn     :accessor py-function-cl-fn     :initform nil)
+   (%generator :initarg :generator :accessor py-function-generator :initform nil))
   (:documentation "Python function or lambda."))
 
-(defun make-py-function (&key name params body env cl-fn)
+(defun make-py-function (&key name params body env cl-fn generator)
   (make-instance 'py-function
                  :name (or name "<lambda>")
                  :params (or params '())
                  :body body
                  :env env
-                 :cl-fn cl-fn))
+                 :cl-fn cl-fn
+                 :generator generator))
 
 ;;; method -----------------------------------------------------------------
 (defclass py-super (py-object)
@@ -711,6 +714,10 @@
 (defmethod py-repr ((obj py-module))
   (format nil "<module '~A'>" (py-module-name obj)))
 (defmethod py-str-of ((obj py-module)) (py-repr obj))
+
+(defmethod py-repr ((obj py-generator))
+  (make-py-str "<generator object>"))
+(defmethod py-str-of ((obj py-generator)) (py-repr obj))
 
 (defmethod py-repr ((obj py-iterator))
   "<iterator>")
@@ -1517,6 +1524,11 @@
 
 (defmethod py-next ((obj py-iterator))
   (funcall (py-iterator-next-fn obj)))
+
+(defmethod py-iter ((obj py-generator)) obj)
+
+(defmethod py-next ((obj py-generator))
+  (py-generator-send obj :next-signal))
 
 (defmethod py-iter ((obj py-list))
   (let ((vec (py-list-value obj))
