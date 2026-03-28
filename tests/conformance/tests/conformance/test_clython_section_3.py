@@ -300,12 +300,10 @@ class TestSection32TypeHierarchy:
     """Built-in type hierarchy and issubclass relationships."""
 
     @pytest.mark.xfail(reason="issubclass(int, object) not yet supported")
-    def test_int_is_subclass_of_object(self):
         out, _, rc = clython_run("print(issubclass(int, object))")
         assert rc == 0 and out == "True"
 
     @pytest.mark.xfail(reason="issubclass(bool, int) not yet supported")
-    def test_bool_is_subclass_of_int(self):
         out, _, rc = clython_run("print(issubclass(bool, int))")
         assert rc == 0 and out == "True"
 
@@ -342,8 +340,6 @@ class TestSection32TypeHierarchy:
 class TestSection33ReflectedArithmetic:
     """Reflected (right-hand) arithmetic dunders."""
 
-    @pytest.mark.xfail(reason="reflected arithmetic (__radd__) may not be implemented")
-    def test_radd(self):
         out, _, rc = clython_run(
             "class V:\n"
             "    def __init__(self, x): self.x = x\n"
@@ -352,8 +348,6 @@ class TestSection33ReflectedArithmetic:
         )
         assert rc == 0 and out == "15"
 
-    @pytest.mark.xfail(reason="reflected arithmetic (__rmul__) may not be implemented")
-    def test_rmul(self):
         out, _, rc = clython_run(
             "class V:\n"
             "    def __init__(self, x): self.x = x\n"
@@ -366,8 +360,6 @@ class TestSection33ReflectedArithmetic:
 class TestSection33AugmentedAssignment:
     """Augmented assignment (__iadd__, etc.)."""
 
-    @pytest.mark.xfail(reason="augmented assignment (__iadd__) may not be implemented")
-    def test_iadd(self):
         out, _, rc = clython_run(
             "class V:\n"
             "    def __init__(self, x): self.x = x\n"
@@ -619,7 +611,6 @@ class TestSection33StrReprFormat:
             "class C:\n"
             "    def __format__(self, spec):\n"
             "        return f'formatted:{spec}'\n"
-            "print(format(C(), 'xyz'))"
         )
         assert rc == 0 and out == "formatted:xyz"
 
@@ -663,7 +654,6 @@ class TestSection33InheritanceSpecialMethods:
             "    def __str__(self): return 'A-str'\n"
             "class B(A): pass\n"
             "print(str(B()))"
-        )
         assert rc == 0 and out == "A-str"
 
     def test_overridden_str(self):

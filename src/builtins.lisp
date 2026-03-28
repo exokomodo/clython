@@ -57,7 +57,8 @@
    #:+builtin-delattr+
    #:+builtin-staticmethod+
    #:+builtin-classmethod+
-   #:+builtin-property+))
+   #:+builtin-property+
+#:+builtin-format+))
 
 (in-package :clython.builtins)
 
@@ -156,7 +157,11 @@
       (py-bool-from-cl (py-bool-val (first args)))))
 
 (defbuiltin +builtin-type+ "type" (obj)
-  (make-py-type :name (py-type-of obj)))
+  ;; Return the actual class object if available
+  (let ((cls (py-object-class obj)))
+    (if (typep cls 'py-type)
+        cls
+        (make-py-type :name (py-type-of obj)))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; len
@@ -210,10 +215,50 @@
               (let ((obj-cls (py-object-class obj)))
                 (%is-subtype-p obj-cls typeobj)))))))
 
+(defvar *builtin-type-hierarchy* (make-hash-table :test #'equal)
+  "Maps builtin type name → list of parent type names (MRO-like).")
+
+(defun %register-builtin-type-hierarchy ()
+  (let ((tree '(("object"     . ())
+                ("type"       . ("object"))
+                ("int"        . ("object"))
+                ("bool"       . ("int" "object"))
+                ("float"      . ("object"))
+                ("complex"    . ("object"))
+                ("str"        . ("object"))
+                ("bytes"      . ("object"))
+                ("list"       . ("object"))
+                ("tuple"      . ("object"))
+                ("dict"       . ("object"))
+                ("set"        . ("object"))
+                ("frozenset"  . ("object"))
+                ("NoneType"   . ("object"))
+                ("function"   . ("object")))))
+    (dolist (entry tree)
+      (setf (gethash (car entry) *builtin-type-hierarchy*)
+            (cons (car entry) (cdr entry))))))
+
+(%register-builtin-type-hierarchy)
+
 (defbuiltin +builtin-issubclass+ "issubclass" (subtype supertype)
-  ;; Simplified: compare type names
   (py-bool-from-cl
-   (string= (py-type-name subtype) (py-type-name supertype))))
+   (let ((sub-name (cond
+                     ((typep subtype 'py-type) (py-type-name subtype))
+                     ((typep subtype 'py-function) (py-function-name subtype))
+                     (t "")))
+         (super-name (cond
+                       ((typep supertype 'py-type) (py-type-name supertype))
+                       ((typep supertype 'py-function) (py-function-name supertype))
+                       (t ""))))
+     (or (string= sub-name super-name)
+         ;; Check user-defined class hierarchy
+         (and (typep subtype 'py-type)
+              (%is-subtype-p subtype supertype))
+         ;; Check built-in exception hierarchy
+         (clython.runtime:exception-is-subclass-p sub-name super-name)
+         ;; Check built-in type hierarchy
+         (let ((mro (gethash sub-name *builtin-type-hierarchy*)))
+           (when mro (member super-name mro :test #'string=)))))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; range
@@ -486,6 +531,19 @@
   (py-delattr obj (py-str-value name))
   +py-none+)
 
+;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; format
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(defbuiltin +builtin-format+ "format" (obj &rest args)
+  (let ((spec (if args (py-str-value (first args)) "")))
+    ;; Try __format__ dunder
+    (let ((fn (%lookup-dunder obj "__format__")))
+      (if fn
+          (py-call fn obj (make-py-str spec))
+          ;; Default: use str()
+          (make-py-str (py-str-of obj))))))
+
 ;;; staticmethod / classmethod / property
 
 (defbuiltin +builtin-staticmethod+ "staticmethod" (func)
@@ -553,7 +611,9 @@
                (cons "delattr"      +builtin-delattr+)
                (cons "staticmethod" +builtin-staticmethod+)
                (cons "classmethod"  +builtin-classmethod+)
-               (cons "property"     +builtin-property+))))
+               (cons "property"     +builtin-property+)
+               (cons "format"       +builtin-format+)
+               (cons "object"       (make-py-type :name "object")))))
     (dolist (pair pairs)
       (setf (gethash (car pair) *builtins*) (cdr pair)))))
 

@@ -721,12 +721,35 @@
 
 ;;; ─── Augmented assignment ──────────────────────────────────────────────────
 
+(defun %iop-dunder-name (op)
+  "Return the in-place dunder name for augmented assignment op keyword, or NIL."
+  (case op
+    (:add       "__iadd__")
+    (:sub       "__isub__")
+    (:mult      "__imul__")
+    (:div       "__itruediv__")
+    (:floor-div "__ifloordiv__")
+    (:mod       "__imod__")
+    (:pow       "__ipow__")
+    (:bit-and   "__iand__")
+    (:bit-or    "__ior__")
+    (:bit-xor   "__ixor__")
+    (:l-shift   "__ilshift__")
+    (:r-shift   "__irshift__")
+    (otherwise nil)))
+
 (defmethod eval-node ((node clython.ast:aug-assign-node) env)
   (let* ((target (clython.ast:aug-assign-node-target node))
          (op (clython.ast:aug-assign-node-op node))
          (rhs (eval-node (clython.ast:aug-assign-node-value node) env))
          (current (eval-node target env))
-         (new-val (%binop-dispatch op current rhs)))
+         ;; Try in-place dunder first (e.g. __iadd__ for +=)
+         (iop-name (%iop-dunder-name op))
+         (iop-fn (when (and iop-name (typep current 'clython.runtime:py-object))
+                   (clython.runtime:%lookup-dunder current iop-name)))
+         (new-val (if iop-fn
+                      (clython.runtime:py-call iop-fn current rhs)
+                      (%binop-dispatch op current rhs))))
     (%assign-target target new-val env)
     clython.runtime:+py-none+))
 

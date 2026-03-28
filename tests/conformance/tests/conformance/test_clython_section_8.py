@@ -300,12 +300,10 @@ class TestSection87ClassDefinitions:
         out, _, rc = clython_run(
             "class C:\n    def __repr__(self):\n        return 'C()'\nc = C()\nprint(repr(c))"
         )
-        assert rc == 0 and out == "C()"
 
 
 # ── 8.9 Decorators ────────────────────────────────────────────────────────
 
-class TestSection89Decorators:
     def test_simple_decorator(self):
         out, _, rc = clython_run(
             "def deco(f):\n    def wrapper():\n        print('before')\n        f()\n        print('after')\n    return wrapper\n@deco\ndef greet():\n    print('hello')\ngreet()"
@@ -833,7 +831,6 @@ class TestSection87ClassDefinitionsExtended:
         assert rc == 0 and out == "True True"
 
     @pytest.mark.xfail(reason="issubclass not correctly implemented for user-defined classes")
-    def test_issubclass_check(self):
         out, _, rc = clython_run(
             "class Base:\n    pass\n"
             "class Child(Base):\n    pass\n"

@@ -182,7 +182,8 @@
    #:py-runtime-error
    #:py-runtime-error-class-name
    #:py-runtime-error-message
-   #:py-raise))
+   #:py-raise
+   #:%lookup-dunder))
 
 (in-package :clython.runtime)
 
@@ -614,14 +615,10 @@
 ;; py-repr default for py-object is defined in the dunder fallbacks section below
 
 (defmethod py-str-of ((obj py-object))
-  "Default: check for __str__ in class dict, else use __repr__."
-  (let ((cls (py-object-class obj)))
-    (when (typep cls 'py-type)
-      (let ((tdict (py-type-dict cls)))
-        (when tdict
-          (multiple-value-bind (str-fn found) (gethash "__str__" tdict)
-            (when found
-              (return-from py-str-of (py-str-value (py-call str-fn obj)))))))))
+  "Default: check for __str__ in class hierarchy, else use __repr__."
+  (let ((str-fn (%lookup-dunder obj "__str__")))
+    (when str-fn
+      (return-from py-str-of (py-str-value (py-call str-fn obj)))))
   (py-repr obj))
 
 (defmethod py-repr ((obj py-none))   "None")
@@ -2127,16 +2124,39 @@
 (defmethod py-add ((a py-object) b)
   (let ((fn (%lookup-dunder a "__add__")))
     (if fn (py-call fn a b)
+        ;; Try reflected
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__radd__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for +"))))))
+
+;; Reflected: when left operand is a built-in type and right is py-object with __radd__
+(defmethod py-add (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__radd__")))
+    (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for +"))))
 
 (defmethod py-sub ((a py-object) b)
   (let ((fn (%lookup-dunder a "__sub__")))
     (if fn (py-call fn a b)
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__rsub__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for -"))))))
+
+(defmethod py-sub (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__rsub__")))
+    (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for -"))))
 
 (defmethod py-mul ((a py-object) b)
   (let ((fn (%lookup-dunder a "__mul__")))
     (if fn (py-call fn a b)
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__rmul__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for *"))))))
+
+(defmethod py-mul (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__rmul__")))
+    (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for *"))))
 
 (defmethod py-eq ((a py-object) (b py-object))
