@@ -1320,7 +1320,11 @@
                            `((and tok (eq (tok-type tok) :op) (string= (tok-value tok) ,op-str))
                              (ps-advance ps)
                              (let ((right (,child-rule ps)))
-                               (when (failp right) (return left))
+                               (when (failp right)
+                                 (error 'parser-error
+                                        :message (format nil "Expected expression after '~A'" ,op-str)
+                                        :line (tok-line tok)
+                                        :column (tok-col tok)))
                                (setf left
                                      (make-node 'clython.ast:bin-op-node
                                                 :left left :op ,ast-op :right right

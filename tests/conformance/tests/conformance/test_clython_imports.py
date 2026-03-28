@@ -125,17 +125,14 @@ class TestFromImport:
 class TestDottedImports:
     """Test dotted module import syntax."""
 
-    @pytest.mark.xfail(reason="os module import not yet supported (parse error)")
     def test_import_os_path(self):
         out, _, rc = clython_run("import os.path\nprint(type(os.path).__name__)")
         assert rc == 0 and out == "module"
 
-    @pytest.mark.xfail(reason="os module import not yet supported (parse error)")
     def test_from_os_import_path(self):
         out, _, rc = clython_run("from os import path\nprint(type(path).__name__)")
         assert rc == 0 and out == "module"
 
-    @pytest.mark.xfail(reason="os module import not yet supported (parse error)")
     def test_from_os_path_import_join(self):
         out, _, rc = clython_run("from os.path import join\nprint(type(join).__name__)")
         assert rc == 0 and out == "function"
@@ -196,17 +193,14 @@ class TestStdlibImport:
         out, _, rc = clython_run("import keyword\nprint('for' in keyword.kwlist)")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="json module import not yet supported (parse error)")
     def test_import_json(self):
         out, _, rc = clython_run("import json\nprint(json.dumps({'a': 1}))")
         assert rc == 0 and out == '{"a": 1}'
 
-    @pytest.mark.xfail(reason="collections module import not yet supported (parse error)")
     def test_import_collections(self):
         out, _, rc = clython_run("import collections\nprint(type(collections).__name__)")
         assert rc == 0 and out == "module"
 
-    @pytest.mark.xfail(reason="os module import not yet supported (parse error)")
     def test_import_os(self):
         out, _, rc = clython_run("import os\nprint(type(os).__name__)")
         assert rc == 0 and out == "module"

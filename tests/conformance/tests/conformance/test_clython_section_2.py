@@ -886,7 +886,6 @@ class TestSection23IdentifierContexts:
         assert rc == 0
         assert out == "<class 'MyClass'>"
 
-    @pytest.mark.xfail(reason="Clython does not support import statements fully")
     def test_import_alias(self):
         out, _, rc = clython_run("import os as operating_system\nprint(type(operating_system))")
         assert rc == 0
@@ -1558,7 +1557,6 @@ class TestSection28DelimitersExtended:
 class TestSection28OperatorErrors:
     """2.8: Error conditions for operators."""
 
-    @pytest.mark.xfail(reason="Clython does not reject incomplete expression 'x = 1 +'")
     def test_incomplete_expression_plus(self):
         _, _, rc = clython_run("x = 1 +")
         assert rc != 0

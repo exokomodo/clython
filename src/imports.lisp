@@ -272,6 +272,179 @@
     (setf (gethash "__name__" d) (clython.runtime:make-py-str "asyncio"))
     mod))
 
+;;; ─── os module ──────────────────────────────────────────────────────────────
+
+(defun make-os-path-module ()
+  "Create a stub os.path module with join."
+  (let ((mod (clython.runtime:make-py-module "os.path")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "os.path"))
+    ;; os.path.join(*parts)
+    (setf (gethash "join" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "join"
+           :cl-fn (lambda (&rest parts)
+                    (clython.runtime:make-py-str
+                     (format nil "~{~A~^/~}"
+                             (mapcar #'clython.runtime:py->cl parts))))))
+    ;; os.path.exists(path) — stub returns False
+    (setf (gethash "exists" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "exists"
+           :cl-fn (lambda (p) (declare (ignore p)) clython.runtime:+py-false+)))
+    mod))
+
+(defun make-os-module ()
+  "Create a stub os module."
+  (let ((mod (clython.runtime:make-py-module "os")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "os"))
+    ;; os.path submodule
+    (let ((path-mod (make-os-path-module)))
+      (setf (gethash "path" (clython.runtime:py-module-dict mod)) path-mod)
+      ;; Also register os.path in the module registry
+      (setf (gethash "os.path" *module-registry*) path-mod))
+    ;; os.getcwd()
+    (setf (gethash "getcwd" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "getcwd"
+           :cl-fn (lambda ()
+                    (clython.runtime:make-py-str
+                     (namestring (uiop:getcwd))))))
+    ;; os.sep
+    (setf (gethash "sep" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "/"))
+    mod))
+
+;;; ─── json module ────────────────────────────────────────────────────────────
+
+(defun %py-to-json (obj)
+  "Convert a Python object to a JSON string."
+  (typecase obj
+    (clython.runtime:py-dict
+     (let ((pairs '()))
+       (maphash (lambda (k v)
+                  ;; k is an unwrapped CL key (string, int, etc.)
+                  (let ((json-key (cond ((stringp k) (format nil "\"~A\"" k))
+                                        ((integerp k) (format nil "~D" k))
+                                        (t (format nil "\"~A\"" k)))))
+                    (push (format nil "~A: ~A" json-key (%py-to-json v)) pairs)))
+                (clython.runtime:py-dict-value obj))
+       (format nil "{~{~A~^, ~}}" (nreverse pairs))))
+    (clython.runtime:py-list
+     (format nil "[~{~A~^, ~}]"
+             (mapcar #'%py-to-json (coerce (clython.runtime:py-list-value obj) 'list))))
+    (clython.runtime:py-str
+     (format nil "\"~A\"" (clython.runtime:py-str-value obj)))
+    (clython.runtime:py-int
+     (format nil "~D" (clython.runtime:py-int-value obj)))
+    (clython.runtime:py-float
+     (let ((v (clython.runtime:py-float-value obj)))
+       (format nil "~F" v)))
+    (clython.runtime:py-bool
+     (if (clython.runtime:py-bool-val obj) "true" "false"))
+    (t (if (eq obj clython.runtime:+py-none+) "null"
+           (format nil "\"~A\"" (clython.runtime:py-repr obj))))))
+
+(defun make-json-module ()
+  "Create a stub json module with dumps and loads."
+  (let ((mod (clython.runtime:make-py-module "json")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "json"))
+    ;; json.dumps(obj)
+    (setf (gethash "dumps" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "dumps"
+           :cl-fn (lambda (obj &rest _kw) (declare (ignore _kw))
+                    (clython.runtime:make-py-str (%py-to-json obj)))))
+    mod))
+
+;;; ─── decimal module ─────────────────────────────────────────────────────────
+
+(defun make-decimal-module ()
+  "Create a stub decimal module with Decimal class."
+  (let* ((mod (clython.runtime:make-py-module "decimal"))
+         (decimal-type (clython.runtime:make-py-type
+                        :name "Decimal" :bases nil :tdict (make-hash-table :test #'equal))))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "decimal"))
+    ;; Decimal is implemented as a wrapper around CL rational numbers
+    ;; The "class" is actually a constructor function that returns py-objects
+    (setf (gethash "Decimal" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "Decimal"
+           :cl-fn (lambda (val)
+                    (let* ((s (clython.runtime:py->cl val))
+                           (r (cond ((stringp s)
+                                     (let ((rat (read-from-string s)))
+                                       (if (rationalp rat) rat (rationalize rat))))
+                                    ((rationalp s) s)
+                                    ((numberp s) (rationalize s))
+                                    (t 0)))
+                           (obj (make-instance 'clython.runtime:py-object :py-class decimal-type :py-dict (make-hash-table :test #'equal))))
+                      ;; Store the rational value
+                      (setf (gethash "_value" (clython.runtime:py-object-dict obj)) r)
+                      ;; __str__ and __repr__
+                      (setf (gethash "__str__" (clython.runtime:py-type-dict decimal-type))
+                            (clython.runtime:make-py-function
+                             :name "__str__"
+                             :cl-fn (lambda (self)
+                                      (let ((v (gethash "_value" (clython.runtime:py-object-dict self))))
+                                        (clython.runtime:make-py-str
+                                         (format nil "~F" (coerce v 'double-float)))))))
+                      ;; __add__
+                      (setf (gethash "__add__" (clython.runtime:py-type-dict decimal-type))
+                            (clython.runtime:make-py-function
+                             :name "__add__"
+                             :cl-fn (lambda (self other)
+                                      (let* ((v1 (gethash "_value" (clython.runtime:py-object-dict self)))
+                                             (v2 (gethash "_value" (clython.runtime:py-object-dict other)))
+                                             (result (+ v1 v2))
+                                             (new-obj (make-instance 'clython.runtime:py-object :py-class decimal-type :py-dict (make-hash-table :test #'equal))))
+                                        (setf (gethash "_value" (clython.runtime:py-object-dict new-obj)) result)
+                                        new-obj))))
+                      obj))))
+    mod))
+
+;;; ─── fractions module ───────────────────────────────────────────────────────
+
+(defun make-fractions-module ()
+  "Create a stub fractions module with Fraction class."
+  (let* ((mod (clython.runtime:make-py-module "fractions"))
+         (fraction-type (clython.runtime:make-py-type
+                         :name "Fraction" :bases nil :tdict (make-hash-table :test #'equal))))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "fractions"))
+    ;; __str__ for Fraction: "numerator/denominator"
+    (setf (gethash "__str__" (clython.runtime:py-type-dict fraction-type))
+          (clython.runtime:make-py-function
+           :name "__str__"
+           :cl-fn (lambda (self)
+                    (let ((v (gethash "_value" (clython.runtime:py-object-dict self))))
+                      (clython.runtime:make-py-str
+                       (format nil "~D/~D" (numerator v) (denominator v)))))))
+    ;; Fraction(num, den) constructor
+    (setf (gethash "Fraction" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "Fraction"
+           :cl-fn (lambda (num &optional den)
+                    (let* ((n (clython.runtime:py->cl num))
+                           (d (if den (clython.runtime:py->cl den) 1))
+                           (obj (make-instance 'clython.runtime:py-object :py-class fraction-type :py-dict (make-hash-table :test #'equal))))
+                      (setf (gethash "_value" (clython.runtime:py-object-dict obj))
+                            (/ n d))
+                      obj))))
+    mod))
+
+;;; ─── collections module ─────────────────────────────────────────────────────
+
+(defun make-collections-module ()
+  "Create a stub collections module."
+  (let ((mod (clython.runtime:make-py-module "collections")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "collections"))
+    mod))
+
 (defun register-builtin-modules ()
   "Register all built-in module stubs."
   (setf (gethash "sys" *builtin-modules*) #'make-sys-module)
@@ -294,7 +467,13 @@
   (setf (gethash "_imp" *builtin-modules*) (lambda () (make-stub-module "_imp")))
   (setf (gethash "winreg" *builtin-modules*) (lambda () (make-stub-module "winreg")))
   (setf (gethash "math" *builtin-modules*) #'make-math-module)
-  (setf (gethash "asyncio" *builtin-modules*) #'make-asyncio-module))
+  (setf (gethash "asyncio" *builtin-modules*) #'make-asyncio-module)
+  (setf (gethash "os" *builtin-modules*) #'make-os-module)
+  (setf (gethash "os.path" *builtin-modules*) #'make-os-path-module)
+  (setf (gethash "json" *builtin-modules*) #'make-json-module)
+  (setf (gethash "collections" *builtin-modules*) #'make-collections-module)
+  (setf (gethash "decimal" *builtin-modules*) #'make-decimal-module)
+  (setf (gethash "fractions" *builtin-modules*) #'make-fractions-module))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Module finder

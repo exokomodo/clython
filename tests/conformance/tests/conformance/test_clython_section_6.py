@@ -158,12 +158,10 @@ class TestSection61ComplexConversions:
 class TestSection61DecimalFractionTypes:
     """6.1: Decimal and Fraction type integration."""
 
-    @pytest.mark.xfail(reason="decimal module import not yet supported")
     def test_decimal_addition(self):
         out, _, rc = clython_run("from decimal import Decimal\nprint(Decimal('1.1') + Decimal('2.2'))")
         assert rc == 0 and out == "3.3"
 
-    @pytest.mark.xfail(reason="fractions module import not yet supported")
     def test_fraction_creation(self):
         out, _, rc = clython_run("from fractions import Fraction\nprint(Fraction(1, 3))")
         assert rc == 0 and out == "1/3"

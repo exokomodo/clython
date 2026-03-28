@@ -919,7 +919,6 @@ class TestSection711ImportStatementExtended:
         out, _, rc = clython_run("from math import sqrt as s\nprint(int(s(25)))")
         assert rc == 0 and out == "5"
 
-    @pytest.mark.xfail(reason="dotted imports may not be implemented")
     def test_import_os_path(self):
         out, _, rc = clython_run("import os.path\nprint(type(os.path).__name__)")
         assert rc == 0  # Just verify it doesn't crash
