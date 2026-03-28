@@ -17,6 +17,7 @@
    #:+builtin-str+
    #:+builtin-int+
    #:+builtin-float+
+   #:+builtin-complex+
    #:+builtin-bool+
    #:+builtin-type+
    #:+builtin-len+
@@ -158,6 +159,39 @@
                (t (make-py-float (float (read-from-string s) 1.0d0))))))
           (t (clython.runtime:py-raise "TypeError" "float() argument must be a string or a real number, not '~A'"
                     (py-type-of obj)))))))
+
+(defbuiltin +builtin-complex+ "complex" (&rest args)
+  (cond
+    ((null args) (make-py-complex #C(0.0d0 0.0d0)))
+    ((= (length args) 1)
+     (let ((obj (first args)))
+       (cond
+         ((typep obj 'py-complex) obj)
+         ((typep obj 'py-int)   (make-py-complex (complex (float (py-int-value obj) 1.0d0) 0.0d0)))
+         ((typep obj 'py-float) (make-py-complex (complex (py-float-value obj) 0.0d0)))
+         ((typep obj 'py-bool)  (make-py-complex (complex (if (py-bool-raw obj) 1.0d0 0.0d0) 0.0d0)))
+         ((typep obj 'py-str)
+          (let ((s (string-trim '(#\Space #\Tab #\Newline) (py-str-value obj))))
+            ;; Simple parsing: handle "1+2j", "3j", "4", etc.
+            ;; Delegate to CL reader after stripping j
+            (handler-case
+                (let ((val (read-from-string (substitute #\d #\j (substitute #\D #\J s)))))
+                  (make-py-complex (coerce val '(complex double-float))))
+              (error () (py-raise "ValueError" "complex() arg is a malformed string")))))
+         (t (py-raise "TypeError" "complex() first argument must be a string or a number")))))
+    ((= (length args) 2)
+     (let ((real-val (let ((r (first args)))
+                       (cond ((typep r 'py-int) (float (py-int-value r) 1.0d0))
+                             ((typep r 'py-float) (py-float-value r))
+                             ((typep r 'py-bool) (if (py-bool-raw r) 1.0d0 0.0d0))
+                             (t (py-raise "TypeError" "complex() first argument must be a number")))))
+           (imag-val (let ((i (second args)))
+                       (cond ((typep i 'py-int) (float (py-int-value i) 1.0d0))
+                             ((typep i 'py-float) (py-float-value i))
+                             ((typep i 'py-bool) (if (py-bool-raw i) 1.0d0 0.0d0))
+                             (t (py-raise "TypeError" "complex() second argument must be a number"))))))
+       (make-py-complex (complex real-val imag-val))))
+    (t (py-raise "TypeError" "complex() takes at most 2 arguments"))))
 
 (defbuiltin +builtin-bool+ "bool" (&rest args)
   (if (null args)
@@ -681,6 +715,7 @@
                (cons "classmethod"  +builtin-classmethod+)
                (cons "property"     +builtin-property+)
                (cons "format"       +builtin-format+)
+               (cons "complex"      +builtin-complex+)
                (cons "object"       (make-py-type :name "object"))
                ;; Constants
                (cons "Ellipsis"     clython.runtime:+py-ellipsis+)

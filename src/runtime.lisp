@@ -925,6 +925,17 @@
   (= (py-float-value a) (py-int-value b)))
 (defmethod py-eq ((a py-complex) (b py-complex))
   (= (py-complex-value a) (py-complex-value b)))
+
+(defmethod py-getattr ((obj py-complex) (name string))
+  (let ((z (py-complex-value obj)))
+    (cond
+      ((string= name "real") (make-py-float (realpart z)))
+      ((string= name "imag") (make-py-float (imagpart z)))
+      ((string= name "conjugate")
+       (make-py-function :name "conjugate"
+         :cl-fn (lambda (&rest args) (declare (ignore args))
+                  (make-py-complex (conjugate z)))))
+      (t (call-next-method)))))
 (defmethod py-eq ((a py-str) (b py-str))
   (string= (py-str-value a) (py-str-value b)))
 (defmethod py-eq ((a py-bytes) (b py-bytes))
