@@ -737,10 +737,10 @@
 (defmethod py-str-of ((obj py-set)) (py-repr obj))
 
 (defmethod py-repr ((obj py-frozenset))
-  (let ((keys (%hash-table-keys (py-frozenset-value obj))))
-    (if (null keys)
+  (let ((vals (%hash-table-values (py-frozenset-value obj))))
+    (if (null vals)
         "frozenset()"
-        (format nil "frozenset({~{~A~^, ~}})" (mapcar #'py-repr keys)))))
+        (format nil "frozenset({~{~A~^, ~}})" (mapcar #'py-repr vals)))))
 (defmethod py-str-of ((obj py-frozenset)) (py-repr obj))
 
 (defmethod py-repr ((obj py-function))
@@ -876,6 +876,40 @@
 (defmethod py-le ((a py-str) (b py-str)) (string<= (py-str-value a) (py-str-value b)))
 (defmethod py-gt ((a py-str) (b py-str)) (string> (py-str-value a) (py-str-value b)))
 (defmethod py-ge ((a py-str) (b py-str)) (string>= (py-str-value a) (py-str-value b)))
+
+;; sequence ordering (lexicographic, element-wise) for tuples and lists
+(defun %seq-compare (va vb)
+  "Lexicographic comparison of two sequences of py objects.
+   Returns -1, 0, or 1."
+  (let ((la (length va))
+        (lb (length vb)))
+    (dotimes (i (min la lb))
+      (let ((ai (elt va i))
+            (bi (elt vb i)))
+        (cond
+          ((py-lt ai bi) (return-from %seq-compare -1))
+          ((py-lt bi ai) (return-from %seq-compare 1)))))
+    (cond ((< la lb) -1)
+          ((> la lb) 1)
+          (t 0))))
+
+(defmethod py-lt ((a py-tuple) (b py-tuple))
+  (= (%seq-compare (py-tuple-value a) (py-tuple-value b)) -1))
+(defmethod py-le ((a py-tuple) (b py-tuple))
+  (<= (%seq-compare (py-tuple-value a) (py-tuple-value b)) 0))
+(defmethod py-gt ((a py-tuple) (b py-tuple))
+  (= (%seq-compare (py-tuple-value a) (py-tuple-value b)) 1))
+(defmethod py-ge ((a py-tuple) (b py-tuple))
+  (>= (%seq-compare (py-tuple-value a) (py-tuple-value b)) 0))
+
+(defmethod py-lt ((a py-list) (b py-list))
+  (= (%seq-compare (py-list-value a) (py-list-value b)) -1))
+(defmethod py-le ((a py-list) (b py-list))
+  (<= (%seq-compare (py-list-value a) (py-list-value b)) 0))
+(defmethod py-gt ((a py-list) (b py-list))
+  (= (%seq-compare (py-list-value a) (py-list-value b)) 1))
+(defmethod py-ge ((a py-list) (b py-list))
+  (>= (%seq-compare (py-list-value a) (py-list-value b)) 0))
 
 ;;; arithmetic -------------------------------------------------------------
 
@@ -1102,6 +1136,49 @@
   (make-py-tuple (concatenate 'list
                                (coerce (py-tuple-value a) 'list)
                                (coerce (py-tuple-value b) 'list))))
+
+;; set operations: & (intersection), | (union), ^ (symmetric difference), - (difference)
+(defmethod py-and ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v)
+               (when (nth-value 1 (gethash k hb))
+                 (setf (gethash k result) v)))
+             ha)
+    (make-instance 'py-set :value result)))
+
+(defmethod py-or ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v) (setf (gethash k result) v)) ha)
+    (maphash (lambda (k v) (setf (gethash k result) v)) hb)
+    (make-instance 'py-set :value result)))
+
+(defmethod py-xor ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k hb))
+                 (setf (gethash k result) v)))
+             ha)
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k ha))
+                 (setf (gethash k result) v)))
+             hb)
+    (make-instance 'py-set :value result)))
+
+(defmethod py-sub ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k hb))
+                 (setf (gethash k result) v)))
+             ha)
+    (make-instance 'py-set :value result)))
 
 ;;; unary ------------------------------------------------------------------
 
@@ -1805,21 +1882,21 @@
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-set))
-  (let ((keys (%hash-table-keys (py-set-value obj)))
+  (let ((vals (%hash-table-values (py-set-value obj)))
         (i 0))
     (make-py-iterator
      (lambda ()
-       (if (< i (length keys))
-           (prog1 (nth i keys) (incf i))
+       (if (< i (length vals))
+           (prog1 (nth i vals) (incf i))
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-frozenset))
-  (let ((keys (%hash-table-keys (py-frozenset-value obj)))
+  (let ((vals (%hash-table-values (py-frozenset-value obj)))
         (i 0))
     (make-py-iterator
      (lambda ()
-       (if (< i (length keys))
-           (prog1 (nth i keys) (incf i))
+       (if (< i (length vals))
+           (prog1 (nth i vals) (incf i))
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-range))

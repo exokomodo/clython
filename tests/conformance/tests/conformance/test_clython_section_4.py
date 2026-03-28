@@ -315,7 +315,6 @@ class TestSection42ComprehensionScopes:
         )
         assert rc == 0 and out == "{0: 0, 1: 2, 2: 4}"
 
-    @pytest.mark.xfail(reason="set comprehension may not be implemented")
     def test_setcomp(self):
         out, _, rc = clython_run(
             "s = {x % 3 for x in range(6)}\nprint(sorted(s))"

@@ -514,7 +514,6 @@ class TestSection83ForStatementsExtended:
         )
         assert rc == 0 and out == "else ran"
 
-    @pytest.mark.xfail(reason="set element comparison (py-lt) not implemented for sorted()")
     def test_for_set_iteration(self):
         out, _, rc = clython_run(
             "result = sorted([x for x in {3, 1, 2}])\nprint(result)"

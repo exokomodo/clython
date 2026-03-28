@@ -718,7 +718,6 @@ class TestSection63DictMethods:
         out, _, rc = clython_run("print(sorted({'a': 1, 'b': 2}.values()))")
         assert rc == 0 and out == "[1, 2]"
 
-    @pytest.mark.xfail(reason="Sorting tuples not yet supported (tuple comparison)")
     def test_dict_items(self):
         out, _, rc = clython_run("print(sorted({'a': 1, 'b': 2}.items()))")
         assert rc == 0 and out == "[('a', 1), ('b', 2)]"
@@ -735,7 +734,6 @@ class TestSection63DictMethods:
         out, _, rc = clython_run("d = {'a': 1, 'b': 2}\nprint(d.pop('a'))\nprint(d)")
         assert rc == 0 and out == "1\n{'b': 2}"
 
-    @pytest.mark.xfail(reason="Sorting tuples not yet supported (tuple comparison)")
     def test_dict_update(self):
         out, _, rc = clython_run("d = {'a': 1}\nd.update({'b': 2})\nprint(sorted(d.items()))")
         assert rc == 0 and out == "[('a', 1), ('b', 2)]"
@@ -1150,17 +1148,14 @@ class TestSection69Bitwise:
         out, _, rc = clython_run("print(True ^ True)")
         assert rc == 0 and out == "0"
 
-    @pytest.mark.xfail(reason="Set bitwise operations not yet supported")
     def test_set_intersection_via_and(self):
         out, _, rc = clython_run("print({1, 2, 3} & {2, 3, 4})")
         assert rc == 0 and out == "{2, 3}"
 
-    @pytest.mark.xfail(reason="Set bitwise operations not yet supported")
     def test_set_union_via_or(self):
         out, _, rc = clython_run("print(sorted({1, 2, 3} | {3, 4, 5}))")
         assert rc == 0 and out == "[1, 2, 3, 4, 5]"
 
-    @pytest.mark.xfail(reason="Set bitwise operations not yet supported")
     def test_set_symmetric_diff_via_xor(self):
         out, _, rc = clython_run("print(sorted({1, 2, 3} ^ {2, 3, 4}))")
         assert rc == 0 and out == "[1, 4]"
