@@ -1030,6 +1030,12 @@
                  (make-py-list (coerce vec 'list)))))
         (t (call-next-method))))))
 
+(defmethod py-getattr ((obj py-type) (name string))
+  ;; Built-in attributes for type objects
+  (cond
+    ((string= name "__name__") (make-py-str (py-type-name obj)))
+    (t (call-next-method))))
+
 (defmethod py-getattr ((obj py-object) (name string))
   (let ((d (py-object-dict obj)))
     (when (hash-table-p d)
@@ -1493,6 +1499,15 @@
         (member parent-name mro :test #'string=)
         ;; Unknown exception — only match if names are equal
         (string= child-name parent-name))))
+
+(defmethod py-getattr ((obj py-exception-object) (name string))
+  ;; Built-in attributes for exception instances
+  (cond
+    ((string= name "args")
+     (make-py-tuple (or (py-exception-args obj) '())))
+    ((string= name "__class__")
+     (make-py-type :name (py-exception-class-name obj)))
+    (t (call-next-method))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Keyword argument passing for builtins

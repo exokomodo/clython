@@ -214,7 +214,6 @@ class TestClythonReRaise:
 class TestClythonExceptionChaining:
     """Test raise ... from ... (exception chaining)."""
 
-    @pytest.mark.xfail(reason="raise...from not yet implemented in evaluator")
     def test_raise_from(self):
         """raise X from Y should chain exceptions."""
         stdout, stderr, rc = clython_run(
