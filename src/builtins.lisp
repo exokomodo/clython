@@ -328,7 +328,7 @@
       (stop-iteration ()
         (if default
             default
-            (error 'stop-iteration))))))
+            (py-raise "StopIteration" ""))))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; chr / ord

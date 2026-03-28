@@ -55,6 +55,10 @@
 (defvar *current-exception* nil
   "The currently active exception (py-exception condition), for bare `raise`.")
 
+(defvar *generator-yield-fn* nil
+  "When non-nil, we are executing inside a generator body.
+   Calling this function yields a value and suspends execution.")
+
 (defgeneric eval-node (node env)
   (:documentation "Evaluate an AST node in the given environment."))
 
@@ -324,35 +328,52 @@
         (let ((clython.runtime:*current-kwargs* kwargs))
           (apply #'clython.runtime:py-call func args)))))
 
-(defun %call-user-function-from-cl-fn (params body closure-env args)
+(defun %call-user-function-from-cl-fn (params body closure-env args &optional is-generator)
   "Called from the cl-fn closure installed on user-defined functions.
    This allows py-call to work for decorators, callbacks, etc."
+  (if is-generator
+      (%make-generator-from-body params body closure-env args clython.runtime:*current-kwargs*)
+      (let ((call-env (clython.scope:env-extend closure-env)))
+        (%bind-params params args call-env clython.runtime:*current-kwargs*)
+        (handler-case
+            (progn
+              (dolist (stmt body)
+                (eval-node stmt call-env))
+              clython.runtime:+py-none+)
+          (py-return-value (ret)
+            (py-return-value-val ret))))))
+
+(defun %make-generator-from-body (params body closure-env args kwargs)
+  "Create a py-generator that lazily executes BODY using a thread."
   (let ((call-env (clython.scope:env-extend closure-env)))
-    (%bind-params params args call-env clython.runtime:*current-kwargs*)
-    (handler-case
-        (progn
-          (dolist (stmt body)
-            (eval-node stmt call-env))
-          clython.runtime:+py-none+)
-      (py-return-value (ret)
-        (py-return-value-val ret)))))
+    (%bind-params params args call-env kwargs)
+    (clython.runtime:make-py-generator
+     (lambda (yield-fn)
+       (let ((*generator-yield-fn* yield-fn))
+         ;; Execute body — return just ends the generator
+         (handler-case
+             (dolist (stmt body)
+               (eval-node stmt call-env))
+           (py-return-value () nil)))))))  ;; return in generator = StopIteration
 
 (defun %call-user-function (func args &optional kwargs)
   "Call a user-defined py-function with the given evaluated arguments."
   (let* ((closure-env (clython.runtime:py-function-env func))
-         (call-env (clython.scope:env-extend closure-env))
          (params (clython.runtime:py-function-params func))
          (body (clython.runtime:py-function-body func)))
-    ;; Bind positional arguments and keyword arguments
-    (%bind-params params args call-env kwargs)
-    ;; Execute body, catching return
-    (handler-case
-        (progn
-          (dolist (stmt body)
-            (eval-node stmt call-env))
-          clython.runtime:+py-none+)
-      (py-return-value (ret)
-        (py-return-value-val ret)))))
+    ;; Check if this is a generator function
+    (if (clython.runtime:py-function-generator func)
+        (%make-generator-from-body params body closure-env args kwargs)
+        ;; Normal function call
+        (let ((call-env (clython.scope:env-extend closure-env)))
+          (%bind-params params args call-env kwargs)
+          (handler-case
+              (progn
+                (dolist (stmt body)
+                  (eval-node stmt call-env))
+                clython.runtime:+py-none+)
+            (py-return-value (ret)
+              (py-return-value-val ret)))))))
 
 (defun %bind-params (params args env &optional kwargs)
   "Bind function parameters to argument values in ENV.
@@ -462,6 +483,30 @@
 
 ;;; ─── Lambda ─────────────────────────────────────────────────────────────────
 
+;;; ─── Yield expressions ─────────────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:yield-node) env)
+  (unless *generator-yield-fn*
+    (error "SyntaxError: 'yield' outside function"))
+  (let ((val (if (clython.ast:yield-node-value node)
+                 (eval-node (clython.ast:yield-node-value node) env)
+                 clython.runtime:+py-none+)))
+    (funcall *generator-yield-fn* val)))
+
+(defmethod eval-node ((node clython.ast:yield-from-node) env)
+  (unless *generator-yield-fn*
+    (error "SyntaxError: 'yield from' outside function"))
+  (let* ((iterable (eval-node (clython.ast:yield-from-node-value node) env))
+         (iterator (clython.runtime:py-iter iterable)))
+    (handler-case
+        (loop
+          (let ((val (clython.runtime:py-next iterator)))
+            (funcall *generator-yield-fn* val)))
+      (clython.runtime:stop-iteration () nil))
+    clython.runtime:+py-none+))
+
+;;; ─── Lambda ───────────────────────────────────────────────────────────────
+
 (defmethod eval-node ((node clython.ast:lambda-node) env)
   (let ((evaled-params (%eval-defaults (clython.ast:lambda-node-args node) env)))
     (clython.runtime:make-py-function
@@ -494,6 +539,29 @@
                              ifs)
                   (%eval-comprehension-generators (rest generators) elt-fn env))))
           (clython.runtime:stop-iteration () nil)))))
+
+(defun %eval-genexp-generators (generators outer-iter node env yield-fn)
+  "Evaluate generator expression generators, yielding each element via yield-fn.
+   OUTER-ITER is the pre-evaluated outermost iterable."
+  (let* ((gen (first generators))
+         (iterator (if outer-iter
+                       (clython.runtime:py-iter outer-iter)
+                       (clython.runtime:py-iter
+                        (eval-node (clython.ast:comprehension-iter gen) env))))
+         (target (clython.ast:comprehension-target gen))
+         (ifs (clython.ast:comprehension-ifs gen)))
+    (handler-case
+        (loop
+          (let ((item (clython.runtime:py-next iterator)))
+            (%assign-target target item env)
+            (when (every (lambda (if-node)
+                           (clython.runtime:py-bool-val (eval-node if-node env)))
+                         ifs)
+              (if (rest generators)
+                  (%eval-genexp-generators (rest generators) nil node env yield-fn)
+                  (funcall yield-fn
+                           (eval-node (clython.ast:generator-exp-node-elt node) env))))))
+      (clython.runtime:stop-iteration () nil))))
 
 (defmethod eval-node ((node clython.ast:list-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
@@ -528,21 +596,17 @@
     d))
 
 (defmethod eval-node ((node clython.ast:generator-exp-node) env)
-  ;; Simplified: collect into a list and return an iterator over it
-  (let ((comp-env (clython.scope:env-extend env))
-        (results '()))
-    (%eval-comprehension-generators
-     (clython.ast:generator-exp-node-generators node)
-     (lambda ()
-       (push (eval-node (clython.ast:generator-exp-node-elt node) comp-env) results))
-     comp-env)
-    (let ((items (nreverse results))
-          (idx 0))
-      (clython.runtime:make-py-iterator
-       (lambda ()
-         (if (< idx (length items))
-             (prog1 (nth idx items) (incf idx))
-             (error 'clython.runtime:stop-iteration)))))))
+  ;; Create a lazy generator using a thread
+  (let ((generators (clython.ast:generator-exp-node-generators node))
+        (comp-env (clython.scope:env-extend env)))
+    ;; Pre-evaluate the outermost iterable now (at creation time, per Python semantics)
+    (let ((outer-iter (eval-node (clython.ast:comprehension-iter (first generators))
+                                  comp-env)))
+      (clython.runtime:make-py-generator
+       (lambda (yield-fn)
+         (let ((*generator-yield-fn* yield-fn)
+               (inner-env (clython.scope:env-extend comp-env)))
+           (%eval-genexp-generators generators outer-iter node inner-env yield-fn)))))))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Statements
@@ -715,6 +779,51 @@
         (eval-node stmt env)))
     clython.runtime:+py-none+))
 
+;;; ─── Generator helpers ─────────────────────────────────────────────────────
+
+(defun %ast-contains-yield-p (nodes)
+  "Check if a list of AST nodes (function body) contains any yield or yield-from.
+   Does NOT recurse into nested function/class definitions."
+  (labels ((check (node)
+             (cond
+               ((null node) nil)
+               ((typep node 'clython.ast:yield-node) t)
+               ((typep node 'clython.ast:yield-from-node) t)
+               ;; Don't recurse into nested functions or classes
+               ((typep node 'clython.ast:function-def-node) nil)
+               ((typep node 'clython.ast:class-def-node) nil)
+               ((typep node 'clython.ast:lambda-node) nil)
+               ;; Recurse into compound statements
+               ((typep node 'clython.ast:if-node)
+                (or (some #'check (clython.ast:if-node-body node))
+                    (some #'check (clython.ast:if-node-orelse node))))
+               ((typep node 'clython.ast:while-node)
+                (or (some #'check (clython.ast:while-node-body node))
+                    (some #'check (clython.ast:while-node-orelse node))))
+               ((typep node 'clython.ast:for-node)
+                (or (some #'check (clython.ast:for-node-body node))
+                    (some #'check (clython.ast:for-node-orelse node))))
+               ((typep node 'clython.ast:try-node)
+                (or (some #'check (clython.ast:try-node-body node))
+                    (some (lambda (h)
+                            (some #'check (clython.ast:exception-handler-body h)))
+                          (clython.ast:try-node-handlers node))
+                    (some #'check (clython.ast:try-node-orelse node))
+                    (some #'check (clython.ast:try-node-finalbody node))))
+               ((typep node 'clython.ast:with-node)
+                (some #'check (clython.ast:with-node-body node)))
+               ((typep node 'clython.ast:expr-stmt-node)
+                (check (clython.ast:expr-stmt-node-value node)))
+               ((typep node 'clython.ast:assign-node)
+                (check (clython.ast:assign-node-value node)))
+               ((typep node 'clython.ast:aug-assign-node)
+                (check (clython.ast:aug-assign-node-value node)))
+               ((typep node 'clython.ast:return-node)
+                (and (clython.ast:return-node-value node)
+                     (check (clython.ast:return-node-value node))))
+               (t nil))))
+    (some #'check nodes)))
+
 ;;; ─── Function definition ──────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:function-def-node) env)
@@ -723,16 +832,18 @@
          (body (%sort-body (clython.ast:function-def-node-body node)))
          ;; Evaluate default values now (at definition time)
          (evaled-params (%eval-defaults params env))
+         (is-generator (%ast-contains-yield-p body))
          (func (clython.runtime:make-py-function
                 :name name
                 :params evaled-params
                 :body body
                 :env env
+                :generator is-generator
                 :cl-fn (lambda (&rest args)
                          ;; This closure makes py-call work for user-defined functions
                          ;; (needed for decorators, first-class function passing via py-call)
                          (%call-user-function-from-cl-fn
-                          evaled-params body env args)))))
+                          evaled-params body env args is-generator)))))
     ;; Apply decorators (in reverse order)
     (let ((decorated func))
       (dolist (dec-node (reverse (clython.ast:function-def-node-decorator-list node)))
