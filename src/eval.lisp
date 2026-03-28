@@ -384,7 +384,6 @@
 ;;; ─── Slice ──────────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:slice-node) env)
-  ;; Return a tuple of (start, stop, step) for now — simplified
   (let ((lower (if (clython.ast:slice-node-lower node)
                    (eval-node (clython.ast:slice-node-lower node) env)
                    clython.runtime:+py-none+))
@@ -394,7 +393,7 @@
         (step  (if (clython.ast:slice-node-step node)
                    (eval-node (clython.ast:slice-node-step node) env)
                    clython.runtime:+py-none+)))
-    (clython.runtime:make-py-tuple (list lower upper step))))
+    (clython.runtime:make-py-slice lower upper step)))
 
 ;;; ─── Starred expression ────────────────────────────────────────────────────
 

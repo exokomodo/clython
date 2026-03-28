@@ -30,6 +30,7 @@
    #:py-module
    #:py-iterator
    #:py-range
+   #:py-slice
 
    ;; Slot accessors
    #:py-int-value
@@ -58,6 +59,9 @@
    #:py-range-start
    #:py-range-stop
    #:py-range-step
+   #:py-slice-start
+   #:py-slice-stop
+   #:py-slice-step
 
    ;; Helpers / internal
    #:py-bool-from-cl
@@ -86,6 +90,7 @@
    #:make-py-module
    #:make-py-iterator
    #:make-py-range
+   #:make-py-slice
 
    ;; Protocols (generic functions)
    #:py-repr
@@ -338,6 +343,15 @@
 (defun make-py-range (start stop &optional (step 1))
   (make-instance 'py-range :start start :stop stop :step step))
 
+(defclass py-slice (py-object)
+  ((%start :initarg :start :accessor py-slice-start)
+   (%stop  :initarg :stop  :accessor py-slice-stop)
+   (%step  :initarg :step  :accessor py-slice-step))
+  (:documentation "Python slice object — slice(start, stop, step)."))
+
+(defun make-py-slice (start stop step)
+  (make-instance 'py-slice :start start :stop stop :step step))
+
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; StopIteration condition
 ;;;; ─────────────────────────────────────────────────────────────────────────
@@ -520,6 +534,13 @@
       (format nil "range(~D, ~D, ~D)"
               (py-range-start obj) (py-range-stop obj) (py-range-step obj))))
 (defmethod py-str-of ((obj py-range)) (py-repr obj))
+
+(defmethod py-repr ((obj py-slice))
+  (format nil "slice(~A, ~A, ~A)"
+          (py-repr (py-slice-start obj))
+          (py-repr (py-slice-stop obj))
+          (py-repr (py-slice-step obj))))
+(defmethod py-str-of ((obj py-slice)) (py-repr obj))
 
 ;;; __bool__ ---------------------------------------------------------------
 
@@ -782,6 +803,54 @@
 
 ;;; subscript access -------------------------------------------------------
 
+(defun resolve-slice-index (idx len default)
+  "Resolve a single slice index: if py-none, return DEFAULT; if py-int, return CL integer."
+  (cond
+    ((eq idx +py-none+) default)
+    ((typep idx 'py-int) (py-int-value idx))
+    (t (error "TypeError: slice indices must be integers or None, not ~A"
+              (py-type-name (py-type-of idx))))))
+
+(defun compute-slice-indices (slice-obj len)
+  "Compute (start stop step) for a py-slice given sequence length LEN.
+   Faithfully implements CPython's PySlice_Unpack + PySlice_AdjustIndices."
+  (let ((step-val (py-slice-step slice-obj))
+        (start-val (py-slice-start slice-obj))
+        (stop-val (py-slice-stop slice-obj)))
+    ;; 1. Unpack step
+    (let ((step (if (eq step-val +py-none+) 1 (py-int-value step-val))))
+      (when (zerop step)
+        (error "ValueError: slice step cannot be zero"))
+      ;; 2. Unpack start
+      (let ((start (cond
+                     ((eq start-val +py-none+)
+                      (if (> step 0) 0 (1- len)))
+                     (t (let ((v (py-int-value start-val)))
+                          (if (< v 0)
+                              (max (+ len v) 0)
+                              (min v len)))))))
+        ;; 3. Unpack stop
+        (let ((stop (cond
+                      ((eq stop-val +py-none+)
+                       (if (> step 0) len -1))
+                      (t (let ((v (py-int-value stop-val)))
+                           (if (< v 0)
+                               (max (+ len v) -1)
+                               (min v len)))))))
+          (values start stop step))))))
+
+(defun slice-collect (vec len slice-obj element-fn)
+  "Collect elements from a sequence of length LEN using SLICE-OBJ.
+   ELEMENT-FN is called with the index to get each element."
+  (multiple-value-bind (start stop step) (compute-slice-indices slice-obj len)
+    (let ((result '()))
+      (if (> step 0)
+          (loop for i from start below stop by step
+                do (push (funcall element-fn i) result))
+          (loop for i from start above stop by (- step)
+                do (push (funcall element-fn i) result)))
+      (nreverse result))))
+
 (defgeneric py-getitem (obj key)
   (:documentation "Python obj[key]."))
 
@@ -821,6 +890,11 @@
                 do (setf (aref vec j) (aref vec (1+ j))))
           (decf (fill-pointer vec))))))
 
+(defmethod py-getitem ((obj py-list) (key py-slice))
+  (let* ((vec (py-list-value obj))
+         (len (length vec)))
+    (make-py-list (slice-collect vec len key (lambda (i) (aref vec i))))))
+
 (defmethod py-getitem ((obj py-tuple) (key py-int))
   (let* ((vec (py-tuple-value obj))
          (len (length vec))
@@ -830,6 +904,11 @@
         (error "IndexError: tuple index out of range")
         (svref vec i))))
 
+(defmethod py-getitem ((obj py-tuple) (key py-slice))
+  (let* ((vec (py-tuple-value obj))
+         (len (length vec)))
+    (make-py-tuple (slice-collect vec len key (lambda (i) (svref vec i))))))
+
 (defmethod py-getitem ((obj py-str) (key py-int))
   (let* ((s   (py-str-value obj))
          (len (length s))
@@ -838,6 +917,11 @@
     (if (or (< i 0) (>= i len))
         (error "IndexError: string index out of range")
         (make-py-str (string (char s i))))))
+
+(defmethod py-getitem ((obj py-str) (key py-slice))
+  (let* ((s   (py-str-value obj))
+         (len (length s)))
+    (make-py-str (coerce (slice-collect s len key (lambda (i) (char s i))) 'string))))
 
 (defun dict-hash-key (key)
   "Unwrap a Python object to a CL value suitable for EQUAL hash-table lookup.
