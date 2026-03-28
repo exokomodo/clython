@@ -72,12 +72,10 @@ class TestSection61IntFloatConversions:
         out, _, rc = clython_run("print(7.5 / 2)")
         assert rc == 0 and out == "3.75"
 
-    @pytest.mark.xfail(reason="Float // int not yet supported")
     def test_float_floordiv_int(self):
         out, _, rc = clython_run("print(9.0 // 4)")
         assert rc == 0 and out == "2.0"
 
-    @pytest.mark.xfail(reason="Float % int not yet supported")
     def test_float_mod_int(self):
         out, _, rc = clython_run("print(5.5 % 2)")
         assert rc == 0 and out == "1.5"
@@ -104,47 +102,38 @@ class TestSection61IntFloatConversions:
 class TestSection61BooleanConversions:
     """6.1: Boolean arithmetic conversion (True=1, False=0)."""
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_true_plus_int(self):
         out, _, rc = clython_run("print(True + 1)")
         assert rc == 0 and out == "2"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_false_plus_int(self):
         out, _, rc = clython_run("print(False + 5)")
         assert rc == 0 and out == "5"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_true_times_int(self):
         out, _, rc = clython_run("print(True * 10)")
         assert rc == 0 and out == "10"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_false_times_int(self):
         out, _, rc = clython_run("print(False * 42)")
         assert rc == 0 and out == "0"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_true_minus_false(self):
         out, _, rc = clython_run("print(True - False)")
         assert rc == 0 and out == "1"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_true_plus_true(self):
         out, _, rc = clython_run("print(True + True)")
         assert rc == 0 and out == "2"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_true_plus_float(self):
         out, _, rc = clython_run("print(True + 1.0)")
         assert rc == 0 and out == "2.0"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_false_plus_float(self):
         out, _, rc = clython_run("print(False + 3.14)")
         assert rc == 0 and out == "3.14"
 
-    @pytest.mark.xfail(reason="Bool arithmetic not yet supported")
     def test_true_div_true_is_float(self):
         out, _, rc = clython_run("print(True / True)")
         assert rc == 0 and out == "1.0"
@@ -229,12 +218,10 @@ class TestSection62BuiltinConstants:
         out, _, rc = clython_run("print(...)")
         assert rc == 0 and out == "Ellipsis"
 
-    @pytest.mark.xfail(reason="Bool == int comparison returns False")
     def test_true_is_1(self):
         out, _, rc = clython_run("print(True == 1)")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="Bool == int comparison returns False")
     def test_false_is_0(self):
         out, _, rc = clython_run("print(False == 0)")
         assert rc == 0 and out == "True"
@@ -655,27 +642,22 @@ class TestSection63StringMethods:
         out, _, rc = clython_run("print('hello'.upper())")
         assert rc == 0 and out == "HELLO"
 
-    @pytest.mark.xfail(reason="String method isdigit not yet implemented")
     def test_string_isdigit(self):
         out, _, rc = clython_run("print('123'.isdigit())")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="String method isalpha not yet implemented")
     def test_string_isalpha(self):
         out, _, rc = clython_run("print('abc'.isalpha())")
         assert rc == 0 and out == "True"
 
-    @pytest.mark.xfail(reason="String method title not yet implemented")
     def test_string_title(self):
         out, _, rc = clython_run("print('hello world'.title())")
         assert rc == 0 and out == "Hello World"
 
-    @pytest.mark.xfail(reason="String method capitalize not yet implemented")
     def test_string_capitalize(self):
         out, _, rc = clython_run("print('hello'.capitalize())")
         assert rc == 0 and out == "Hello"
 
-    @pytest.mark.xfail(reason="String method zfill not yet implemented")
     def test_string_zfill(self):
         out, _, rc = clython_run("print('42'.zfill(5))")
         assert rc == 0 and out == "00042"
@@ -798,7 +780,6 @@ class TestSection65Power:
         out, _, rc = clython_run("print((2 ** 3) ** 2)")
         assert rc == 0 and out == "64"
 
-    @pytest.mark.xfail(reason="Int ** float not yet supported")
     def test_power_with_float_exponent(self):
         out, _, rc = clython_run("print(27 ** (1/3))")
         assert rc == 0 and out == "3.0"
@@ -820,7 +801,6 @@ class TestSection65Power:
         out, _, rc = clython_run("print(1 + 2 ** 3)")
         assert rc == 0 and out == "9"
 
-    @pytest.mark.xfail(reason="Negative exponent producing float not yet supported")
     def test_power_negative_exponent(self):
         out, _, rc = clython_run("print(2 ** -1)")
         assert rc == 0 and out == "0.5"
@@ -894,7 +874,6 @@ class TestSection66Unary:
         out, _, rc = clython_run("print(not 'hello')")
         assert rc == 0 and out == "False"
 
-    @pytest.mark.xfail(reason="Unary minus on bool not yet supported")
     def test_unary_minus_bool(self):
         out, _, rc = clython_run("print(-True)")
         assert rc == 0 and out == "-1"
@@ -991,7 +970,6 @@ class TestSection67Arithmetic:
         out, _, rc = clython_run("print(-7 % 3)")
         assert rc == 0 and out == "2"
 
-    @pytest.mark.xfail(reason="Float // int not yet supported")
     def test_float_floor_division(self):
         out, _, rc = clython_run("print(7.5 // 2)")
         assert rc == 0 and out == "3.0"
@@ -1159,18 +1137,15 @@ class TestSection69Bitwise:
         out, _, rc = clython_run("print(1 << 4 & 0xFF)")
         assert rc == 0 and out == "16"
 
-    @pytest.mark.xfail(reason="Bitwise ops on bools not yet supported")
     def test_and_with_booleans(self):
         """Bitwise & on bools gives int results."""
         out, _, rc = clython_run("print(True & False)")
         assert rc == 0 and out == "0"
 
-    @pytest.mark.xfail(reason="Bitwise ops on bools not yet supported")
     def test_or_with_booleans(self):
         out, _, rc = clython_run("print(True | False)")
         assert rc == 0 and out == "1"
 
-    @pytest.mark.xfail(reason="Bitwise ops on bools not yet supported")
     def test_xor_with_booleans(self):
         out, _, rc = clython_run("print(True ^ True)")
         assert rc == 0 and out == "0"

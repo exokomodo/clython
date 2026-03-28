@@ -1060,13 +1060,11 @@ class TestSection24ImaginaryLiterals:
 class TestSection24BooleanNoneLiterals:
     """2.4: Boolean and None literal values."""
 
-    @pytest.mark.xfail(reason="Clython does not support bool+bool arithmetic")
     def test_true_is_1(self):
         out, _, rc = clython_run("print(True + True)")
         assert rc == 0
         assert out == "2"
 
-    @pytest.mark.xfail(reason="Clython does not support bool+int arithmetic")
     def test_false_is_0(self):
         out, _, rc = clython_run("print(False + 0)")
         assert rc == 0
@@ -1210,13 +1208,11 @@ class TestSection25FStringsExtended:
         assert rc == 0
         assert out == "3.14"
 
-    @pytest.mark.xfail(reason="Clython f-string format spec :04d not fully supported")
     def test_fstring_int_format(self):
         out, _, rc = clython_run("print(f'{42:04d}')")
         assert rc == 0
         assert out == "0042"
 
-    @pytest.mark.xfail(reason="Clython f-string format spec :x not fully supported")
     def test_fstring_hex_format(self):
         out, _, rc = clython_run("print(f'{255:x}')")
         assert rc == 0

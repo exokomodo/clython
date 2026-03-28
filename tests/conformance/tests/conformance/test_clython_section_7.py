@@ -409,7 +409,6 @@ class TestSection71ExpressionStatementsExtended:
         out, _, rc = clython_run("s = 'hello'\nprint(s.upper())")
         assert rc == 0 and out == "HELLO"
 
-    @pytest.mark.xfail(reason="chained method calls may not be implemented")
     def test_chained_method_calls(self):
         out, _, rc = clython_run("print('hello world'.title().replace(' ', '_'))")
         assert rc == 0 and out == "Hello_World"
