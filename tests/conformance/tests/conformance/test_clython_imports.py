@@ -312,13 +312,11 @@ class TestImportErrors:
 class TestDynamicImports:
     """Test dynamic import patterns."""
 
-    @pytest.mark.xfail(reason="__import__ builtin not yet implemented")
     def test_dunder_import(self):
         """__import__ builtin should work."""
         out, _, rc = clython_run("m = __import__('math')\nprint(type(m).__name__)")
         assert rc == 0 and out == "module"
 
-    @pytest.mark.xfail(reason="__import__ builtin not yet implemented")
     def test_dunder_import_use(self):
         out, _, rc = clython_run("m = __import__('math')\nprint(m.pi)")
         assert rc == 0 and out == "3.141592653589793"

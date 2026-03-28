@@ -619,7 +619,6 @@ class TestSection33StrReprFormat:
 class TestSection3DynamicTypeConstruction:
     """Dynamic type creation with type()."""
 
-    @pytest.mark.xfail(reason="three-arg type() may not be implemented")
     def test_type_three_arg(self):
         out, _, rc = clython_run(
             "C = type('C', (object,), {'x': 42})\nprint(C.x)"

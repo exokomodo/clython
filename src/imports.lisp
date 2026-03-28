@@ -410,3 +410,11 @@
 
 ;; Auto-initialize when loaded
 (initialize-import-system)
+
+;; Register __import__ builtin (must happen after imports package is loaded)
+(setf (gethash "__import__" clython.builtins:*builtins*)
+      (clython.runtime:make-py-function
+       :name "__import__"
+       :cl-fn (lambda (name-obj)
+                (let ((name (clython.runtime:py-str-value name-obj)))
+                  (import-module name)))))

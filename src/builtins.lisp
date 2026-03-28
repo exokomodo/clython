@@ -30,6 +30,7 @@
    #:+builtin-frozenset+
    #:+builtin-abs+
    #:+builtin-round+
+   #:+builtin-import+
    #:+builtin-min+
    #:+builtin-max+
    #:+builtin-sum+
@@ -163,12 +164,29 @@
       +py-false+
       (py-bool-from-cl (py-bool-val (first args)))))
 
-(defbuiltin +builtin-type+ "type" (obj)
-  ;; Return the actual class object if available
-  (let ((cls (py-object-class obj)))
-    (if (typep cls 'py-type)
-        cls
-        (make-py-type :name (py-type-of obj)))))
+(defbuiltin +builtin-type+ "type" (&rest args)
+  (cond
+    ;; type(obj) — return the type
+    ((= (length args) 1)
+     (let* ((obj (first args))
+            (cls (py-object-class obj)))
+       (if (typep cls 'py-type)
+           cls
+           (make-py-type :name (py-type-of obj)))))
+    ;; type(name, bases, dict) — create a new class
+    ((= (length args) 3)
+     (let* ((name-obj (first args))
+            (bases-obj (second args))
+            (dict-obj (third args))
+            (name (py-str-value name-obj))
+            (bases (coerce (py-tuple-value bases-obj) 'list))
+            (tdict (make-hash-table :test #'equal)))
+       ;; Copy dict entries
+       (maphash (lambda (k v)
+                  (setf (gethash k tdict) v))
+                (py-dict-value dict-obj))
+       (make-py-type :name name :bases bases :tdict tdict)))
+    (t (py-raise "TypeError" "type() takes 1 or 3 arguments"))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; len
@@ -563,6 +581,9 @@
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; format
 ;;;; ─────────────────────────────────────────────────────────────────────────
+
+;; __import__ is registered dynamically after imports package loads
+;; (see register-import-builtin in imports.lisp)
 
 (defbuiltin +builtin-format+ "format" (obj &rest args)
   (let ((spec (if args (py-str-value (first args)) "")))
