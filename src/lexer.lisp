@@ -248,7 +248,11 @@
                 (write-char esc-ch buf)))
             (write-char (ls-advance ls) buf)))
 
-      (ls-emit ls :string (get-output-stream-string buf) save-line save-col))))
+            ;; Emit with appropriate type based on prefix
+      (let ((token-type (if (find #\f (string-downcase prefix))
+                            :fstring
+                            :string)))
+        (ls-emit ls token-type (get-output-stream-string buf) save-line save-col)))))
 
 (defun scan-number (ls)
   "Scan a numeric literal (int/float/complex); emit a :NUMBER token."
