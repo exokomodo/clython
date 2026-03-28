@@ -937,7 +937,6 @@ class TestSection711ImportStatementExtended:
         out, _, rc = clython_run("from math import ceil, pi\nprint(ceil(pi))")
         assert rc == 0 and out == "4"
 
-    @pytest.mark.xfail(reason="ModuleNotFoundError may differ from ImportError")
     def test_import_error_type(self):
         out, _, rc = clython_run(
             "try:\n    import nonexistent_xyz_123\nexcept ModuleNotFoundError:\n    print('module not found')"

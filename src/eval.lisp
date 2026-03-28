@@ -1768,13 +1768,30 @@
      (when (typep subject 'clython.runtime:py-dict)
        (let ((keys (clython.ast:match-mapping-node-keys pattern))
              (pats (clython.ast:match-mapping-node-patterns pattern))
-             (ht   (clython.runtime:py-dict-value subject)))
-         (loop for key-node in keys
-               for pat in pats
-               for key-val = (eval-node key-node env)
-               always (multiple-value-bind (val found)
-                          (gethash (clython.runtime::dict-hash-key key-val) ht)
-                        (and found (%match-pattern val pat env)))))))
+             (rest-name (clython.ast:match-mapping-node-rest pattern))
+             (ht   (clython.runtime:py-dict-value subject))
+             (matched-keys '()))
+         ;; All specified keys must be present and match
+         (unless (loop for key-node in keys
+                       for pat in pats
+                       for key-val = (eval-node key-node env)
+                       for hk = (clython.runtime::dict-hash-key key-val)
+                       always (multiple-value-bind (val found) (gethash hk ht)
+                                (when found
+                                  (push hk matched-keys)
+                                  (%match-pattern val pat env))))
+           (return-from %match-pattern nil))
+         ;; Bind **rest if specified
+         (when rest-name
+           (let ((rest-dict (make-hash-table :test #'equal)))
+             (maphash (lambda (k v)
+                        (unless (member k matched-keys :test #'equal)
+                          (setf (gethash k rest-dict) v)))
+                      ht)
+             (clython.scope:env-set rest-name
+                                    (clython.runtime:make-py-dict rest-dict)
+                                    env)))
+         t)))
 
     ;; Class pattern (not yet fully supported)
     (clython.ast:match-class-node nil)

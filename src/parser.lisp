@@ -1635,11 +1635,9 @@
                   ;; Skip problematic token and try to continue
                   (return))
                 (if (listp stmt)
-                    (setf stmts (append stmts stmt))
+                    (dolist (s stmt) (push s stmts))
                     (push stmt stmts))))
-            (if (listp (car stmts))
-                stmts ; already in order from append
-                (nreverse stmts))))
+            (nreverse stmts)))
         ;; Inline suite: simple statements on same line
         (parse-simple-stmt-list ps))))
 
@@ -2702,9 +2700,37 @@
              (when (and close (eq (tok-type close) :op) (string= (tok-value close) "]"))
                (ps-advance ps)
                (return)))
-           (let ((p (parse-match-or-pattern ps)))
-             (when (failp p) (return))
-             (push p patterns))
+           ;; Check for *name star pattern
+           (let ((star-tok (ps-token ps)))
+             (if (and star-tok (eq (tok-type star-tok) :op) (string= (tok-value star-tok) "*"))
+                 (progn
+                   (ps-advance ps)
+                   (let ((name-tok (ps-token ps)))
+                     (cond
+                       ;; *name
+                       ((and name-tok (eq (tok-type name-tok) :name)
+                             (not (string= (tok-value name-tok) "_")))
+                        (push (make-node 'clython.ast:match-star-node
+                                         :name (tok-value name-tok)
+                                         :line (tok-line star-tok) :col (tok-col star-tok))
+                              patterns)
+                        (ps-advance ps))
+                       ;; *_ (wildcard star)
+                       ((and name-tok (eq (tok-type name-tok) :name)
+                             (string= (tok-value name-tok) "_"))
+                        (push (make-node 'clython.ast:match-star-node
+                                         :name nil
+                                         :line (tok-line star-tok) :col (tok-col star-tok))
+                              patterns)
+                        (ps-advance ps))
+                       ;; bare * (shouldn't happen in patterns, but handle)
+                       (t (push (make-node 'clython.ast:match-star-node :name nil
+                                           :line (tok-line star-tok) :col (tok-col star-tok))
+                                patterns)))))
+                 ;; Regular pattern
+                 (let ((p (parse-match-or-pattern ps)))
+                   (when (failp p) (return))
+                   (push p patterns))))
            (let ((comma (ps-token ps)))
              (when (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
                (ps-advance ps))))
@@ -2753,6 +2779,54 @@
                  (if (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
                      (progn (ps-advance ps) first)
                      +fail+))))))
+      ;; { } mapping pattern
+      ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "{"))
+       (ps-advance ps)
+       (let ((keys '()) (patterns '()) (rest-name nil))
+         (loop
+           (let ((close (ps-token ps)))
+             (when (and close (eq (tok-type close) :op) (string= (tok-value close) "}"))
+               (ps-advance ps)
+               (return)))
+           ;; Check for **rest
+           (let ((star-tok (ps-token ps)))
+             (when (and star-tok (eq (tok-type star-tok) :op)
+                        (string= (tok-value star-tok) "**"))
+               (ps-advance ps)
+               (let ((name-tok (ps-token ps)))
+                 (when (and name-tok (eq (tok-type name-tok) :name))
+                   (setf rest-name (tok-value name-tok))
+                   (ps-advance ps)))
+               ;; Skip optional comma
+               (let ((c (ps-token ps)))
+                 (when (and c (eq (tok-type c) :op) (string= (tok-value c) ","))
+                   (ps-advance ps)))
+               ;; Continue to check for close brace
+               (let ((close (ps-token ps)))
+                 (when (and close (eq (tok-type close) :op) (string= (tok-value close) "}"))
+                   (ps-advance ps)))
+               (return)))
+           ;; key: pattern
+           (let ((key-expr (parse-atom ps)))
+             (when (failp key-expr) (return))
+             (push key-expr keys)
+             ;; Expect :
+             (let ((colon (ps-token ps)))
+               (unless (and colon (eq (tok-type colon) :op) (string= (tok-value colon) ":"))
+                 (return))
+               (ps-advance ps))
+             (let ((p (parse-match-or-pattern ps)))
+               (when (failp p) (return))
+               (push p patterns)))
+           ;; Optional comma
+           (let ((comma (ps-token ps)))
+             (when (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+               (ps-advance ps))))
+         (make-node 'clython.ast:match-mapping-node
+                    :keys (nreverse keys)
+                    :patterns (nreverse patterns)
+                    :rest rest-name
+                    :line (tok-line tok) :col (tok-col tok))))
       (t +fail+))))
 
 (defrule parse-match-pattern

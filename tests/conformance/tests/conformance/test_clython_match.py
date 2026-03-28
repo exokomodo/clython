@@ -495,7 +495,6 @@ match 1:
 class TestMatchMapping:
     """Test mapping (dict) patterns from Section 8.10."""
 
-    @pytest.mark.xfail(reason="mapping patterns may not be implemented")
     def test_dict_pattern_basic(self):
         out, _, rc = clython_run("""
 match {"action": "move", "x": 5}:
@@ -507,7 +506,6 @@ match {"action": "move", "x": 5}:
         assert rc == 0
         assert out == "move to 5"
 
-    @pytest.mark.xfail(reason="mapping patterns may not be implemented")
     def test_dict_pattern_subset(self):
         """Dict patterns match if keys are present (extra keys allowed)."""
         out, _, rc = clython_run("""
@@ -602,7 +600,6 @@ match 2:
 class TestMatchStarPattern:
     """Test star (*) patterns in sequences from Section 8.10."""
 
-    @pytest.mark.xfail(reason="star patterns in match may not be implemented")
     def test_star_pattern_rest(self):
         out, _, rc = clython_run("""
 match [1, 2, 3, 4]:
@@ -622,7 +619,6 @@ match [1, 2, 3, 4, 5]:
         assert rc == 0
         assert out == "1 [2, 3, 4] 5"
 
-    @pytest.mark.xfail(reason="star patterns in match may not be implemented")
     def test_star_pattern_empty(self):
         out, _, rc = clython_run("""
 match [1]:
@@ -639,7 +635,6 @@ match [1]:
 class TestMatchComplex:
     """Test complex/combined match patterns from Section 8.10."""
 
-    @pytest.mark.xfail(reason="import inside match case body + multi-statement body not fully working")
     def test_match_with_computation_in_body(self):
         out, _, rc = clython_run("""
 match (3, 4):

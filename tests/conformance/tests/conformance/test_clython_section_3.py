@@ -606,12 +606,12 @@ class TestSection3MROAndMultipleInheritance:
 class TestSection33StrReprFormat:
     """Additional string representation tests."""
 
-    @pytest.mark.xfail(reason="__format__ may not be implemented for custom classes")
     def test_format_dunder(self):
         out, _, rc = clython_run(
             "class C:\n"
             "    def __format__(self, spec):\n"
             "        return f'formatted:{spec}'\n"
+            "print(format(C(), 'xyz'))"
         )
         assert rc == 0 and out == "formatted:xyz"
 

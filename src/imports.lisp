@@ -339,7 +339,7 @@
   ;; 3. Find .py file
   (multiple-value-bind (path is-package) (find-module-file name)
     (unless path
-      (clython.runtime:py-raise "ImportError" "No module named '~A'" name))
+      (clython.runtime:py-raise "ModuleNotFoundError" "No module named '~A'" name))
 
     ;; 4. Create module with its own environment
     (let ((mod (clython.runtime:make-py-module name)))
