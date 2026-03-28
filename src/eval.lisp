@@ -1752,8 +1752,11 @@
 ;;; ─── Type alias (stub) ─────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:type-alias-node) env)
-  (declare (ignore env))
-  clython.runtime:+py-none+)
+  ;; Simple type alias — bind `name` to value in env
+  (let ((name (clython.ast:type-alias-node-name node))
+        (value (eval-node (clython.ast:type-alias-node-value node) env)))
+    (clython.scope:env-set name value env)
+    clython.runtime:+py-none+))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Match statement (PEP 634)
@@ -1914,7 +1917,7 @@
                                         (clython.runtime:py-getattr cls "__match_args__")
                                       (error () nil)))
                     (match-args (when (typep match-args-val 'clython.runtime:py-tuple)
-                                  (clython.runtime:py-tuple-value match-args-val))))
+                                  (coerce (clython.runtime:py-tuple-value match-args-val) 'list))))
                (loop for pat in pos-pats
                      for i from 0
                      while all-match
@@ -1924,7 +1927,7 @@
                                                  (clython.runtime:py-getattr subject attr-name)
                                                (error () (setf all-match nil) nil))))
                               (when all-match
-                                (unless (%match-pattern pat attr-val env)
+                                (unless (%match-pattern attr-val pat env)
                                   (setf all-match nil))))
                             (setf all-match nil)))))
            ;; Keyword args
@@ -1936,7 +1939,7 @@
                                           (clython.runtime:py-getattr subject attr-name)
                                         (error () (setf all-match nil) nil))))
                         (when all-match
-                          (unless (%match-pattern kwd-pat attr-val env)
+                          (unless (%match-pattern attr-val kwd-pat env)
                             (setf all-match nil))))))
            all-match))))
 

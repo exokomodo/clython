@@ -532,7 +532,6 @@ match {"x": 1, "y": 2, "z": 3}:
 class TestMatchClass:
     """Test class patterns from Section 8.10."""
 
-    @pytest.mark.xfail(reason="class patterns may not be implemented")
     def test_class_pattern_basic(self):
         out, _, rc = clython_run("""
 class Point:
@@ -548,7 +547,6 @@ match Point(1, 2):
         assert rc == 0
         assert out == "1 2"
 
-    @pytest.mark.xfail(reason="class patterns may not be implemented")
     def test_class_pattern_keyword(self):
         out, _, rc = clython_run("""
 class Point:

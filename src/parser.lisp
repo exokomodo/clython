@@ -1583,6 +1583,30 @@
 
 ;;; --- Named expression (:=) ---
 
+(defrule parse-type-stmt
+  (let ((tok (ps-token ps)))
+    (if (and tok (eq (tok-type tok) :type))
+        (progn
+          (ps-advance ps) ;; consume `type`
+          ;; Parse name
+          (let* ((name-tok (ps-token ps))
+                 (name (and name-tok (tok-value name-tok))))
+            (when name-tok
+              (ps-advance ps) ;; consume name
+              ;; Check for =
+              (let ((assign-tok (ps-token ps)))
+                (when (and assign-tok
+                           (eq (tok-type assign-tok) :op)
+                           (string= (tok-value assign-tok) "="))
+                  (ps-advance ps) ;; consume =
+                  (let ((value (parse-expression ps)))
+                    (if (failp value)
+                        +fail+
+                        (make-node 'clython.ast:type-alias-node
+                                   :name name
+                                   :value value))))))))
+        +fail+)))
+
 (defrule parse-named-expr
   (let ((saved (ps-save ps))
         (expr (parse-lambda ps)))
@@ -1730,6 +1754,7 @@
             #'parse-from-import-stmt
             #'parse-global-stmt
             #'parse-nonlocal-stmt
+            #'parse-type-stmt
             #'parse-assignment-or-expr)
            ps))
 
@@ -2729,25 +2754,44 @@
                         :line (tok-line tok) :col (tok-col tok)))))
       ;; Name — could be capture, value (dotted), or class pattern (Name(...))
       ((and tok (eq (tok-type tok) :name))
-       (let ((saved (ps-save ps))
-             (expr (parse-primary ps)))
-         (if (failp expr)
-             +fail+
-             ;; Check for class pattern: Name( or Name.attr(
-             (let ((next (ps-token ps)))
-               (if (and next (eq (tok-type next) :op) (string= (tok-value next) "("))
-                   ;; Class pattern
-                   (%parse-match-class-pattern expr ps)
-                   ;; Simple name -> capture if not dotted, value if dotted
-                   (if (typep expr 'clython.ast:name-node)
-                       (make-node 'clython.ast:match-as-node
-                                  :pattern nil
-                                  :name (clython.ast:name-node-id expr)
-                                  :line (clython.ast:node-line expr)
-                                  :col (clython.ast:node-col expr))
-                       (make-node 'clython.ast:match-value-node :value expr
-                                  :line (clython.ast:node-line expr)
-                                  :col (clython.ast:node-col expr))))))))
+       ;; Consume the name token
+       (ps-advance ps)
+       (let* ((name-str (tok-value tok))
+              (line (tok-line tok))
+              (col (tok-col tok))
+              (name-node (make-node 'clython.ast:name-node :id name-str :line line :col col))
+              (next (ps-token ps)))
+         ;; Check for dotted name: Name.attr (value pattern)
+         (cond
+           ((and next (eq (tok-type next) :op) (string= (tok-value next) "."))
+            ;; Dotted name — parse as primary starting from the dot
+            ;; Build into an attribute access: parse remaining dots
+            (let ((expr name-node))
+              (loop while (let ((dot (ps-token ps)))
+                            (and dot (eq (tok-type dot) :op) (string= (tok-value dot) ".")))
+                    do (ps-advance ps)  ;; consume '.'
+                       (let ((attr-tok (ps-token ps)))
+                         (when (and attr-tok (eq (tok-type attr-tok) :name))
+                           (ps-advance ps)
+                           (setf expr (make-node 'clython.ast:attribute-node
+                                                 :value expr
+                                                 :attr (tok-value attr-tok)
+                                                 :line (tok-line attr-tok) :col (tok-col attr-tok))))))
+              ;; After dotted name, check for class pattern: Name.attr(
+              (let ((paren (ps-token ps)))
+                (if (and paren (eq (tok-type paren) :op) (string= (tok-value paren) "("))
+                    (%parse-match-class-pattern expr ps)
+                    (make-node 'clython.ast:match-value-node :value expr
+                               :line line :col col)))))
+           ;; Class pattern: Name(...)
+           ((and next (eq (tok-type next) :op) (string= (tok-value next) "("))
+            (%parse-match-class-pattern name-node ps))
+           ;; Simple name → capture pattern
+           (t
+            (make-node 'clython.ast:match-as-node
+                       :pattern nil
+                       :name name-str
+                       :line line :col col)))))
       ;; [ ] sequence pattern
       ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "["))
        (ps-advance ps)
