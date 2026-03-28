@@ -1157,18 +1157,22 @@
          (if (failp operand) +fail+
              (make-node 'clython.ast:unary-op-node :op :invert :operand operand
                         :line (tok-line tok) :col (tok-col tok)))))
-      (t (parse-await-expr ps)))))
+      ;; Non-unary: fall through to power (** binds tighter than unary -)
+      (t (parse-power ps)))))
 
 ;;; --- Power: base ** exp (right-associative) ---
+;;; Grammar: power ::= (await_expr | primary) ["**" u_expr]
+;;; Note: base is NOT a unary expr — this ensures -2**2 == -(2**2) == -4
 
 (defrule parse-power
-  (let ((base (parse-unary ps)))
+  (let ((base (parse-await-expr ps)))
     (when (failp base) (return-from nil +fail+))
     (let ((tok (ps-token ps)))
       (if (and tok (eq (tok-type tok) :op) (string= (tok-value tok) "**"))
           (progn
             (ps-advance ps)
-            (let ((exp (parse-power ps))) ; right-associative: recurse
+            ;; Exponent is a u_expr (unary), allowing -2**-2
+            (let ((exp (parse-unary ps)))
               (if (failp exp) +fail+
                   (make-node 'clython.ast:bin-op-node
                              :left base :op :pow :right exp
@@ -1205,7 +1209,8 @@
 ;; Note: power and unary are already defined above
 
 ;; Multiplicative: * / // % @
-(def-left-binop parse-mul-expr parse-power
+;; Calls parse-unary (not parse-power) — unary sits between * and **
+(def-left-binop parse-mul-expr parse-unary
   ("*" :mult) ("/" :div) ("//" :floor-div) ("%" :mod) ("@" :mat-mult))
 
 ;; Additive: + -
