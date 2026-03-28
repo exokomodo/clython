@@ -1161,6 +1161,8 @@
       (t (parse-power ps)))))
 
 ;;; --- Power: base ** exp (right-associative) ---
+;;; Grammar: power ::= (await_expr | primary) ["**" u_expr]
+;;; Note: base is NOT a unary expr — this ensures -2**2 == -(2**2) == -4
 
 (defrule parse-power
   ;; Grammar: power ::= (await_expr | primary) ["**" u_expr]
