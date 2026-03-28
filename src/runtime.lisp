@@ -26,6 +26,10 @@
    #:py-frozenset
    #:py-function
    #:py-method
+   #:py-super
+   #:make-py-super
+   #:py-super-type
+   #:py-super-obj
    #:py-type
    #:py-module
    #:py-iterator
@@ -332,6 +336,24 @@
                  :cl-fn cl-fn))
 
 ;;; method -----------------------------------------------------------------
+(defclass py-super (py-object)
+  ((%type     :initarg :type     :accessor py-super-type)
+   (%obj      :initarg :obj      :accessor py-super-obj))
+  (:documentation "Python super() proxy — delegates attr lookup to parent class."))
+
+(defmethod py-getattr ((obj py-super) (name string))
+  "Look up NAME in the parent class(es) of the super's type."
+  (let* ((cls (py-super-type obj))
+         (bases (when (typep cls 'py-type) (py-type-bases cls))))
+    (dolist (base bases)
+      (multiple-value-bind (val found) (%lookup-in-class-hierarchy base name)
+        (when found
+          (if (typep val 'py-function)
+              (return-from py-getattr
+                (make-instance 'py-method :function val :self (py-super-obj obj)))
+              (return-from py-getattr val)))))
+    (py-raise "AttributeError" "'super' object has no attribute '~A'" name)))
+
 (defclass py-method (py-object)
   ((%function :initarg :function :accessor py-method-function)
    (%self     :initarg :self     :accessor py-method-self))
@@ -406,6 +428,29 @@
 ;;;; Protocol generic functions
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
+;;; Class hierarchy lookup --------------------------------------------------
+
+(defun %lookup-in-class-hierarchy (cls name)
+  "Look up NAME in CLS's dict, then walk bases recursively (DFS). Returns value or NIL, found-p."
+  (when (typep cls 'py-type)
+    (let ((tdict (py-type-dict cls)))
+      (when tdict
+        (multiple-value-bind (val found) (gethash name tdict)
+          (when found (return-from %lookup-in-class-hierarchy (values val t))))))
+    ;; Walk bases
+    (dolist (base (py-type-bases cls))
+      (multiple-value-bind (val found) (%lookup-in-class-hierarchy base name)
+        (when found (return-from %lookup-in-class-hierarchy (values val t))))))
+  (values nil nil))
+
+;;; Dunder method dispatch helper -------------------------------------------
+
+(defun %lookup-dunder (obj name)
+  "Look up a dunder method NAME in OBJ's class hierarchy. Returns the function or NIL."
+  (let ((cls (py-object-class obj)))
+    (multiple-value-bind (fn found) (%lookup-in-class-hierarchy cls name)
+      (when found fn))))
+
 ;;; __repr__ / __str__ ------------------------------------------------------
 
 (defgeneric py-repr (obj)
@@ -414,18 +459,7 @@
 (defgeneric py-str-of (obj)
   (:documentation "Return a CL string — Python __str__."))
 
-(defmethod py-repr ((obj py-object))
-  "Default: check for __repr__ in class dict, else generic."
-  (let ((cls (py-object-class obj)))
-    (when (typep cls 'py-type)
-      (let ((tdict (py-type-dict cls)))
-        (when tdict
-          (multiple-value-bind (repr-fn found) (gethash "__repr__" tdict)
-            (when found
-              (return-from py-repr (py-str-value (py-call repr-fn obj)))))))))
-  (format nil "<~A object>"
-          (let ((cls (py-object-class obj)))
-            (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))))
+;; py-repr default for py-object is defined in the dunder fallbacks section below
 
 (defmethod py-str-of ((obj py-object))
   "Default: check for __str__ in class dict, else use __repr__."
@@ -629,7 +663,7 @@
 (defmethod py-bool-val ((obj py-dict))   (not (zerop (hash-table-count (py-dict-value obj)))))
 (defmethod py-bool-val ((obj py-set))    (not (zerop (hash-table-count (py-set-value obj)))))
 (defmethod py-bool-val ((obj py-frozenset)) (not (zerop (hash-table-count (py-frozenset-value obj)))))
-(defmethod py-bool-val ((obj py-object)) t) ; default: all other objects are truthy
+;; py-bool-val default for py-object is defined in the dunder fallbacks section below
 
 ;;; __eq__ / __ne__ --------------------------------------------------------
 
@@ -830,6 +864,10 @@
 (defmethod py-pos ((a py-float)) (make-py-float (py-float-value a)))
 (defmethod py-abs ((a py-float)) (make-py-float (abs (py-float-value a))))
 (defmethod py-neg ((a py-complex)) (make-py-complex (- (py-complex-value a))))
+(defmethod py-neg ((a py-object))
+  (let ((fn (%lookup-dunder a "__neg__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for unary -"))))
 (defmethod py-abs ((a py-complex)) (make-py-float (abs (py-complex-value a))))
 
 ;;; attribute access -------------------------------------------------------
@@ -1172,12 +1210,18 @@
   (cond
     ((string= name "__name__") (make-py-str (py-type-name obj)))
     (t
-     ;; Check the type's own dict (class attributes)
-     (let ((tdict (py-type-dict obj)))
-       (when tdict
-         (multiple-value-bind (val found) (gethash name tdict)
-           (when found (return-from py-getattr val)))))
+     ;; Check the type's own dict and parent classes
+     (multiple-value-bind (val found) (%lookup-in-class-hierarchy obj name)
+       (when found (return-from py-getattr val)))
      (call-next-method))))
+
+(defmethod py-setattr ((obj py-type) (name string) value)
+  ;; Set attribute in the type's dict (class attributes)
+  (let ((tdict (py-type-dict obj)))
+    (unless tdict
+      (setf tdict (make-hash-table :test #'equal))
+      (setf (py-type-dict obj) tdict))
+    (setf (gethash name tdict) value)))
 
 (defmethod py-getattr ((obj py-object) (name string))
   ;; 1. Check instance dict
@@ -1185,18 +1229,15 @@
     (when (hash-table-p d)
       (multiple-value-bind (val found) (gethash name d)
         (when found (return-from py-getattr val)))))
-  ;; 2. Check class dict (for methods and class attributes)
+  ;; 2. Check class dict and parent classes (MRO)
   (let ((cls (py-object-class obj)))
-    (when (typep cls 'py-type)
-      (let ((tdict (py-type-dict cls)))
-        (when tdict
-          (multiple-value-bind (val found) (gethash name tdict)
-            (when found
-              ;; If it's a function, return a bound method
-              (if (typep val 'py-function)
-                  (return-from py-getattr
-                    (make-instance 'py-method :function val :self obj))
-                  (return-from py-getattr val))))))))
+    (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
+      (when found
+        ;; If it's a function, return a bound method
+        (if (typep val 'py-function)
+            (return-from py-getattr
+              (make-instance 'py-method :function val :self obj))
+            (return-from py-getattr val)))))
   (py-raise "AttributeError" "'~A' object has no attribute '~A'"
             (let ((cls (py-object-class obj)))
               (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))
@@ -1570,6 +1611,109 @@
 (defmethod py-type-of ((obj py-object))    (string (class-name (class-of obj))))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
+;;;; ═══════════════════════════════════════════════════════════════════════════
+;;;; Dunder method fallbacks for user-defined classes
+;;;; ═══════════════════════════════════════════════════════════════════════════
+
+(defmethod py-repr ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__repr__")))
+    (if fn
+        (py-str-value (py-call fn obj))
+        (format nil "<~A object>"
+                (let ((cls (py-object-class obj)))
+                  (if (typep cls 'py-type) (py-type-name cls)
+                      (class-name (class-of obj))))))))
+
+(defmethod py-len ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__len__")))
+    (if fn
+        (let ((result (py-call fn obj)))
+          (if (typep result 'py-int) (py-int-value result) result))
+        (py-raise "TypeError" "object of type '~A' has no len()"
+                  (class-name (class-of obj))))))
+
+(defmethod py-add ((a py-object) b)
+  (let ((fn (%lookup-dunder a "__add__")))
+    (if fn (py-call fn a b)
+        (py-raise "TypeError" "unsupported operand type(s) for +"))))
+
+(defmethod py-sub ((a py-object) b)
+  (let ((fn (%lookup-dunder a "__sub__")))
+    (if fn (py-call fn a b)
+        (py-raise "TypeError" "unsupported operand type(s) for -"))))
+
+(defmethod py-mul ((a py-object) b)
+  (let ((fn (%lookup-dunder a "__mul__")))
+    (if fn (py-call fn a b)
+        (py-raise "TypeError" "unsupported operand type(s) for *"))))
+
+(defmethod py-eq ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__eq__")))
+    (if fn
+        (let ((result (py-call fn a b)))
+          (py-bool-val result))
+        (eq a b))))
+
+(defmethod py-lt ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__lt__")))
+    (if fn
+        (let ((result (py-call fn a b)))
+          (py-bool-val result))
+        (py-raise "TypeError" "'<' not supported"))))
+
+(defmethod py-bool-val ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__bool__")))
+    (if fn
+        (let ((result (py-call fn obj)))
+          (if (typep result 'py-bool) (py-bool-raw result) (not (null result))))
+        ;; Fallback: check __len__, then default True
+        (let ((len-fn (%lookup-dunder obj "__len__")))
+          (if len-fn
+              (let ((result (py-call len-fn obj)))
+                (not (and (typep result 'py-int) (zerop (py-int-value result)))))
+              t)))))
+
+(defmethod py-getitem ((obj py-object) key)
+  (let ((fn (%lookup-dunder obj "__getitem__")))
+    (if fn (py-call fn obj key)
+        (py-raise "TypeError" "'~A' object is not subscriptable"
+                  (class-name (class-of obj))))))
+
+(defmethod py-setitem ((obj py-object) key value)
+  (let ((fn (%lookup-dunder obj "__setitem__")))
+    (if fn (py-call fn obj key value)
+        (py-raise "TypeError" "'~A' object does not support item assignment"
+                  (class-name (class-of obj))))))
+
+(defmethod py-contains ((obj py-object) item)
+  (let ((fn (%lookup-dunder obj "__contains__")))
+    (if fn
+        (py-bool-val (py-call fn obj item))
+        ;; Fallback: iterate
+        (handler-case
+            (let ((iter (py-iter obj)))
+              (loop (let ((next (py-next iter)))
+                      (when (py-eq next item) (return t)))))
+          (stop-iteration () nil)))))
+
+(defmethod py-iter ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__iter__")))
+    (if fn (py-call fn obj)
+        (py-raise "TypeError" "'~A' object is not iterable"
+                  (class-name (class-of obj))))))
+
+(defmethod py-next ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__next__")))
+    (if fn (py-call fn obj)
+        (py-raise "TypeError" "'~A' object is not an iterator"
+                  (class-name (class-of obj))))))
+
+(defmethod py-call ((obj py-object) &rest args)
+  (let ((fn (%lookup-dunder obj "__call__")))
+    (if fn (apply #'py-call fn obj args)
+        (py-raise "TypeError" "'~A' object is not callable"
+                  (class-name (class-of obj))))))
+
 ;;;; Exception objects — runtime representation of Python exceptions
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 
