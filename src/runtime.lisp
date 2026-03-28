@@ -1296,6 +1296,13 @@
                  (py-bool-from-cl (nth-value 1 (gethash (set-hash-key item) ht))))))
         (t (call-next-method))))))
 
+(defmethod py-getattr ((obj py-function) (name string))
+  ;; Built-in attributes for function objects
+  (cond
+    ((string= name "__name__") (make-py-str (or (py-function-name obj) "<lambda>")))
+    ((string= name "__doc__")  +py-none+)
+    (t (call-next-method))))
+
 (defmethod py-getattr ((obj py-type) (name string))
   ;; Built-in attributes for type objects
   (cond
