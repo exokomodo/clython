@@ -1063,6 +1063,73 @@
                                        (append bound-args call-args))))))))
     mod))
 
+;;;; ─── re module ──────────────────────────────────────────────────────────────
+
+(defun make-re-module ()
+  "Create a re module with flags and basic operations."
+  (let ((mod (clython.runtime:make-py-module "re"))
+        (d nil))
+    (setf d (clython.runtime:py-module-dict mod))
+    (setf (gethash "__name__" d) (clython.runtime:make-py-str "re"))
+    ;; Flags (integer values matching CPython)
+    (setf (gethash "IGNORECASE" d) (clython.runtime:make-py-int 2))
+    (setf (gethash "I" d) (clython.runtime:make-py-int 2))
+    (setf (gethash "MULTILINE" d) (clython.runtime:make-py-int 8))
+    (setf (gethash "M" d) (clython.runtime:make-py-int 8))
+    (setf (gethash "DOTALL" d) (clython.runtime:make-py-int 16))
+    (setf (gethash "S" d) (clython.runtime:make-py-int 16))
+    (setf (gethash "VERBOSE" d) (clython.runtime:make-py-int 64))
+    (setf (gethash "X" d) (clython.runtime:make-py-int 64))
+    (setf (gethash "ASCII" d) (clython.runtime:make-py-int 256))
+    (setf (gethash "A" d) (clython.runtime:make-py-int 256))
+    (setf (gethash "UNICODE" d) (clython.runtime:make-py-int 32))
+    (setf (gethash "U" d) (clython.runtime:make-py-int 32))
+    (setf (gethash "LOCALE" d) (clython.runtime:make-py-int 4))
+    (setf (gethash "L" d) (clython.runtime:make-py-int 4))
+    (setf (gethash "TEMPLATE" d) (clython.runtime:make-py-int 1))
+    (setf (gethash "T" d) (clython.runtime:make-py-int 1))
+    ;; compile(pattern, flags=0) — returns a stub pattern object
+    (let ((pattern-type (clython.runtime:make-py-type :name "Pattern")))
+      (setf (gethash "compile" d)
+            (clython.runtime:make-py-function
+             :name "compile"
+             :cl-fn (lambda (&rest args)
+                      (let ((obj (make-instance 'clython.runtime:py-object
+                                                :py-class pattern-type
+                                                :py-dict (make-hash-table :test #'equal))))
+                        ;; Store pattern and flags
+                        (when (first args)
+                          (setf (gethash "pattern" (clython.runtime:py-object-dict obj))
+                                (first args)))
+                        ;; sub method on pattern
+                        (setf (gethash "sub" (clython.runtime:py-object-dict obj))
+                              (clython.runtime:make-py-function
+                               :name "sub"
+                               :cl-fn (lambda (&rest sub-args)
+                                        (declare (ignore sub-args))
+                                        (clython.runtime:make-py-str ""))))
+                        obj)))))
+    ;; sub(pattern, repl, string) — stub
+    (setf (gethash "sub" d)
+          (clython.runtime:make-py-function
+           :name "sub"
+           :cl-fn (lambda (&rest args)
+                    (if (>= (length args) 3)
+                        (third args)  ; return original string as stub
+                        (clython.runtime:make-py-str "")))))
+    ;; match, search — stubs returning None
+    (setf (gethash "match" d)
+          (clython.runtime:make-py-function
+           :name "match"
+           :cl-fn (lambda (&rest args) (declare (ignore args)) clython.runtime:+py-none+)))
+    (setf (gethash "search" d)
+          (clython.runtime:make-py-function
+           :name "search"
+           :cl-fn (lambda (&rest args) (declare (ignore args)) clython.runtime:+py-none+)))
+    ;; error exception class
+    (setf (gethash "error" d) (clython.runtime:make-py-type :name "error"))
+    mod))
+
 (defun register-builtin-modules ()
   "Register all built-in module stubs."
   (setf (gethash "sys" *builtin-modules*) #'make-sys-module)
