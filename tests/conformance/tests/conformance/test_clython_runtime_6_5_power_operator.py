@@ -160,7 +160,6 @@ def test_negative_base_odd_exponent():
 # Builtin pow() cross-check
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="pow() builtin is not defined in Clython")
 def test_power_equals_pow_builtin():
     """a**b should equal pow(a, b)."""
     source = "print((3 ** 4) == pow(3, 4))"

@@ -118,7 +118,6 @@ def test_starred_in_function_call():
     assert out == "1 2 3"
 
 
-@pytest.mark.xfail(reason="Clython **kwargs unpacking in function calls may not be implemented")
 def test_double_starred_in_function_call():
     out, err, rc = clython_run("kw = {'end': '!', 'sep': '-'}; print('a', 'b', **kw)")
     assert rc == 0

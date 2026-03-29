@@ -34,7 +34,6 @@ class TestBasicTryExcept:
         )
         assert rc == 0 and out == "caught"
 
-    @pytest.mark.xfail(reason="int() with invalid string exits with 'junk in string' instead of raising ValueError")
     def test_catch_value_error(self):
         out, _, rc = clython_run(
             "try:\n    int('not a number')\nexcept ValueError:\n    print('caught')"
@@ -244,7 +243,6 @@ class TestExceptionChaining:
         )
         assert rc == 0 and out == "TypeError\nValueError"
 
-    @pytest.mark.xfail(reason="__context__ attribute not implemented on Clython exception objects")
     def test_exception_context(self):
         """When an exception is raised in an except block, __context__ is set"""
         out, _, rc = clython_run(
@@ -252,7 +250,6 @@ class TestExceptionChaining:
         )
         assert rc == 0 and out == "ValueError"
 
-    @pytest.mark.xfail(reason="__suppress_context__ attribute not implemented on Clython exception objects")
     def test_raise_from_none_suppresses_context(self):
         out, _, rc = clython_run(
             "try:\n    try:\n        raise ValueError('original')\n    except ValueError:\n        raise TypeError('clean') from None\nexcept TypeError as e:\n    print(e.__cause__ is None)\n    print(e.__suppress_context__)"

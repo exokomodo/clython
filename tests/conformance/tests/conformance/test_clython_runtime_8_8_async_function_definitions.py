@@ -49,7 +49,6 @@ def test_async_def_with_await():
     assert out == "done"
 
 
-@pytest.mark.xfail(reason="asyncio.iscoroutine not yet available in Clython's asyncio stub")
 def test_async_def_returns_coroutine():
     """async def produces a coroutine object"""
     out, err, rc = clython_run(

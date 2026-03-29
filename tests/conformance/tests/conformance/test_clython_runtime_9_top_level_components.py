@@ -162,7 +162,6 @@ print(total)
     assert out == "10"
 
 
-@pytest.mark.xfail(reason="Clython try/except at module level may not be implemented")
 def test_try_except_at_module_level():
     source = """
 try:

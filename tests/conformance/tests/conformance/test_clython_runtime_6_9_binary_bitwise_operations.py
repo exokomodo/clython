@@ -228,7 +228,6 @@ def test_set_symmetric_difference():
     assert out == "[1, 4]"
 
 
-@pytest.mark.xfail(reason="Bitwise ops on floats may produce different error in Clython")
 def test_bitwise_and_float_raises():
     """Bitwise AND on floats should raise TypeError."""
     out, err, rc = clython_run("print(3.14 & 1)")
