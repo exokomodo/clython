@@ -437,6 +437,26 @@
       (clython.runtime:py-raise "ValueError" "max() arg is an empty sequence"))
     (reduce (lambda (a b) (if (py-gt a b) a b)) items)))
 
+(defbuiltin +builtin-pow+ "pow" (&rest args)
+  (let ((base (first args))
+        (exp  (second args))
+        (mod  (third args)))
+    (let ((result
+            (cond
+              ((and (typep base 'py-int) (typep exp 'py-int))
+               (let ((bv (py-int-value base))
+                     (ev (py-int-value exp)))
+                 (if (< ev 0)
+                     (make-py-float (expt (float bv 1.0d0) (float ev 1.0d0)))
+                     (make-py-int (expt bv ev)))))
+              (t (make-py-float
+                  (expt (coerce (py->cl base) 'double-float)
+                        (coerce (py->cl exp)  'double-float)))))))
+      (if mod
+          (let ((mv (py-int-value mod)))
+            (make-py-int (mod (py-int-value result) mv)))
+          result))))
+
 (defbuiltin +builtin-sum+ "sum" (&rest args)
   (let ((iterable (first args))
         (start (if (second args) (second args) (make-py-int 0))))
@@ -688,6 +708,7 @@
                (cons "min"          +builtin-min+)
                (cons "max"          +builtin-max+)
                (cons "sum"          +builtin-sum+)
+               (cons "pow"          +builtin-pow+)
                (cons "id"           +builtin-id+)
                (cons "hash"         +builtin-hash+)
                (cons "callable"     +builtin-callable+)

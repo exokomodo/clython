@@ -1121,6 +1121,15 @@
   (py-rshift (%bool-to-int a) b))
 (defmethod py-rshift (a (b py-bool))
   (py-rshift a (%bool-to-int b)))
+;; Default: unsupported types for shift/bitwise
+(defmethod py-lshift (a b)
+  (py-raise "TypeError"
+            "unsupported operand type(s) for <<: '~A' and '~A'"
+            (py-type-of a) (py-type-of b)))
+(defmethod py-rshift (a b)
+  (py-raise "TypeError"
+            "unsupported operand type(s) for >>: '~A' and '~A'"
+            (py-type-of a) (py-type-of b)))
 
 ;; int × int
 (defmethod py-add ((a py-int) (b py-int))
@@ -1149,15 +1158,34 @@
         (make-py-float (expt (float av 1.0d0) bv))
         (make-py-int (expt av bv)))))
 (defmethod py-lshift ((a py-int) (b py-int))
-  (make-py-int (ash (py-int-value a) (py-int-value b))))
+  (let ((n (py-int-value b)))
+    (when (< n 0)
+      (py-raise "ValueError" "negative shift count"))
+    (make-py-int (ash (py-int-value a) n))))
 (defmethod py-rshift ((a py-int) (b py-int))
-  (make-py-int (ash (py-int-value a) (- (py-int-value b)))))
+  (let ((n (py-int-value b)))
+    (when (< n 0)
+      (py-raise "ValueError" "negative shift count"))
+    (make-py-int (ash (py-int-value a) (- n)))))
 (defmethod py-and ((a py-int) (b py-int))
   (make-py-int (logand (py-int-value a) (py-int-value b))))
 (defmethod py-or  ((a py-int) (b py-int))
   (make-py-int (logior (py-int-value a) (py-int-value b))))
 (defmethod py-xor ((a py-int) (b py-int))
   (make-py-int (logxor (py-int-value a) (py-int-value b))))
+;; Default: unsupported types for bitwise ops
+(defmethod py-and (a b)
+  (py-raise "TypeError"
+            "unsupported operand type(s) for &: '~A' and '~A'"
+            (py-type-of a) (py-type-of b)))
+(defmethod py-or (a b)
+  (py-raise "TypeError"
+            "unsupported operand type(s) for |: '~A' and '~A'"
+            (py-type-of a) (py-type-of b)))
+(defmethod py-xor (a b)
+  (py-raise "TypeError"
+            "unsupported operand type(s) for ^: '~A' and '~A'"
+            (py-type-of a) (py-type-of b)))
 
 ;; float × float
 (defmethod py-add ((a py-float) (b py-float))
