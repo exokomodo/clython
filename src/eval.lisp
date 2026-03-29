@@ -99,6 +99,17 @@
 ;;;; Literals / Atoms
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 
+(defun %bytes-literal-p (s)
+  "Return T if S starts with a b or B prefix (bytes literal)."
+  (and (> (length s) 0)
+       (let ((start 0))
+         ;; Skip r/R prefix if before b
+         (when (and (< start (length s))
+                    (find (char s start) "rR"))
+           (incf start))
+         (and (< start (length s))
+              (find (char s start) "bB")))))
+
 (defun %unquote-string (s)
   "Strip quotes and string prefix from a Python string literal token value.
    E.g. \"hello\" → hello, 'hi' → hi, r\"raw\" → raw, \"\"\"triple\"\"\" → triple
@@ -153,6 +164,26 @@
                          (write-char (code-char (parse-integer hex :radix 16)) out)
                          (incf i 4))
                        (progn (write-char c out) (incf i))))
+                  (#\u
+                   ;; \uNNNN unicode escape (4 hex digits)
+                   (if (<= (+ i 6) len)
+                       (let ((hex (subseq s (+ i 2) (+ i 6))))
+                         (handler-case
+                             (progn
+                               (write-char (code-char (parse-integer hex :radix 16)) out)
+                               (incf i 6))
+                           (error () (write-char c out) (incf i))))
+                       (progn (write-char c out) (incf i))))
+                  (#\U
+                   ;; \UNNNNNNNN unicode escape (8 hex digits)
+                   (if (<= (+ i 10) len)
+                       (let ((hex (subseq s (+ i 2) (+ i 10))))
+                         (handler-case
+                             (progn
+                               (write-char (code-char (parse-integer hex :radix 16)) out)
+                               (incf i 10))
+                           (error () (write-char c out) (incf i))))
+                       (progn (write-char c out) (incf i))))
                   (t (write-char c out) (write-char next out) (incf i 2))))
               (progn (write-char c out) (incf i))))))))
 
@@ -163,11 +194,15 @@
       ((eq val t)        clython.runtime:+py-true+)
       ((eq val nil)      clython.runtime:+py-false+)
       ((eq val :none)    clython.runtime:+py-none+)
-      ((eq val :ellipsis) clython.runtime:+py-none+)  ; stub
+      ((eq val :ellipsis) clython.runtime:+py-ellipsis+)
       ((integerp val)    (clython.runtime:make-py-int val))
       ((floatp val)      (clython.runtime:make-py-float (coerce val 'double-float)))
       ((complexp val)    (clython.runtime:make-py-complex val))
-      ((stringp val)     (clython.runtime:make-py-str (%unquote-string val)))
+      ((stringp val)
+       (if (%bytes-literal-p val)
+           (clython.runtime:make-py-bytes
+            (map '(vector (unsigned-byte 8)) #'char-code (%unquote-string val)))
+           (clython.runtime:make-py-str (%unquote-string val))))
       ;; Adjacent string concatenation: (:concat-strings "part1" "part2" ...)
       ((and (consp val) (eq (car val) :concat-strings))
        (clython.runtime:make-py-str
@@ -178,29 +213,56 @@
 (defmethod eval-node ((node clython.ast:name-node) env)
   (clython.scope:env-get (clython.ast:name-node-id node) env))
 
+(defun %eval-elts-with-star (elts env)
+  "Evaluate a list of element nodes, expanding starred nodes inline."
+  (let ((result nil))
+    (dolist (elt elts (nreverse result))
+      (if (typep elt 'clython.ast:starred-node)
+          ;; Unpack the iterable
+          (let ((val (eval-node (clython.ast:starred-node-value elt) env)))
+            (cond
+              ((typep val 'clython.runtime:py-list)
+               (loop for item across (clython.runtime:py-list-value val)
+                     do (push item result)))
+              ((typep val 'clython.runtime:py-tuple)
+               (loop for item across (clython.runtime:py-tuple-value val)
+                     do (push item result)))
+              (t ;; generic iterable — use py-iter/py-next
+               (let ((it (clython.runtime:py-iter val)))
+                 (handler-case
+                     (loop (push (clython.runtime:py-next it) result))
+                   (clython.runtime:stop-iteration () nil))))))
+          (push (eval-node elt env) result)))))
+
 (defmethod eval-node ((node clython.ast:list-node) env)
-  (let ((items (mapcar (lambda (elt) (eval-node elt env))
-                       (clython.ast:list-node-elts node))))
-    (clython.runtime:make-py-list items)))
+  (clython.runtime:make-py-list (%eval-elts-with-star
+                                  (clython.ast:list-node-elts node) env)))
 
 (defmethod eval-node ((node clython.ast:tuple-node) env)
-  (let ((items (mapcar (lambda (elt) (eval-node elt env))
-                       (clython.ast:tuple-node-elts node))))
-    (clython.runtime:make-py-tuple items)))
+  (clython.runtime:make-py-tuple (%eval-elts-with-star
+                                   (clython.ast:tuple-node-elts node) env)))
 
 (defmethod eval-node ((node clython.ast:dict-node) env)
   (let ((d (clython.runtime:make-py-dict)))
     (loop for k-node in (clython.ast:dict-node-keys node)
           for v-node in (clython.ast:dict-node-values node)
-          do (let ((k (eval-node k-node env))
-                   (v (eval-node v-node env)))
-               (clython.runtime:py-setitem d k v)))
+          do (if (null k-node)
+                 ;; **unpacking: k-node is nil, v-node is the dict to unpack
+                 (let ((src (eval-node v-node env)))
+                   (when (typep src 'clython.runtime:py-dict)
+                     (maphash (lambda (k v)
+                                (clython.runtime:py-setitem
+                                 d (clython.runtime:make-py-str k) v))
+                              (clython.runtime:py-dict-value src))))
+                 ;; Normal key: value
+                 (let ((k (eval-node k-node env))
+                       (v (eval-node v-node env)))
+                   (clython.runtime:py-setitem d k v))))
     d))
 
 (defmethod eval-node ((node clython.ast:set-node) env)
-  (let ((items (mapcar (lambda (elt) (eval-node elt env))
-                       (clython.ast:set-node-elts node))))
-    (clython.runtime:make-py-set items)))
+  (clython.runtime:make-py-set (%eval-elts-with-star
+                                 (clython.ast:set-node-elts node) env)))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Expressions
@@ -223,7 +285,11 @@
     (:bit-and   (clython.runtime:py-and left right))
     (:bit-or    (clython.runtime:py-or left right))
     (:bit-xor   (clython.runtime:py-xor left right))
-    (:mat-mult  (clython.runtime:py-raise "TypeError" "@ operator not supported"))))
+    (:mat-mult  (if (typep left 'clython.runtime:py-object)
+                    (let ((fn (clython.runtime:%lookup-dunder left "__matmul__")))
+                      (if fn (clython.runtime:py-call fn left right)
+                          (clython.runtime:py-raise "TypeError" "@ operator not supported")))
+                    (clython.runtime:py-raise "TypeError" "@ operator not supported")))))
 
 (defmethod eval-node ((node clython.ast:bin-op-node) env)
   (let ((left  (eval-node (clython.ast:bin-op-node-left node) env))
@@ -299,19 +365,79 @@
 ;;; ─── Function/method calls ─────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:call-node) env)
-  ;; Special-case: super() with no args — needs calling env for __class__ and self
+  ;; Special-case builtins that need access to the calling environment
   (let ((func-node (clython.ast:call-node-func node)))
-    (when (and (typep func-node 'clython.ast:name-node)
-               (string= (clython.ast:name-node-id func-node) "super")
-               (null (clython.ast:call-node-args node)))
-      (let ((cls (ignore-errors (clython.scope:env-get "__class__" env)))
-            (self (ignore-errors (clython.scope:env-get "self" env))))
-        (when (and cls self)
-          (return-from eval-node
-            (make-instance 'clython.runtime:py-super :type cls :obj self))))))
+    (when (typep func-node 'clython.ast:name-node)
+      (let ((fname (clython.ast:name-node-id func-node)))
+        ;; super() with no args
+        (when (and (string= fname "super")
+                   (null (clython.ast:call-node-args node)))
+          (let ((cls (ignore-errors (clython.scope:env-get "__class__" env)))
+                (self (ignore-errors (clython.scope:env-get "self" env))))
+            (when (and cls self)
+              (return-from eval-node
+                (make-instance 'clython.runtime:py-super :type cls :obj self)))))
+        ;; globals() — return dict of global scope bindings
+        (when (and (string= fname "globals")
+                   (null (clython.ast:call-node-args node)))
+          (let ((d (clython.runtime:make-py-dict))
+                (global-env (loop with e = env
+                                  while (clython.scope:env-parent e)
+                                  do (setf e (clython.scope:env-parent e))
+                                  finally (return e))))
+            (maphash (lambda (k v)
+                       (clython.runtime:py-setitem d (clython.runtime:make-py-str k) v))
+                     (clython.scope:env-bindings global-env))
+            (return-from eval-node d)))
+        ;; locals() — return dict of current scope bindings
+        (when (and (string= fname "locals")
+                   (null (clython.ast:call-node-args node)))
+          (let ((d (clython.runtime:make-py-dict)))
+            (maphash (lambda (k v)
+                       (clython.runtime:py-setitem d (clython.runtime:make-py-str k) v))
+                     (clython.scope:env-bindings env))
+            (return-from eval-node d)))
+        ;; eval(expr_string) — parse and evaluate an expression
+        (when (and (string= fname "eval")
+                   (= (length (clython.ast:call-node-args node)) 1))
+          (let* ((arg (eval-node (first (clython.ast:call-node-args node)) env))
+                 (src (clython.runtime:py-str-value arg))
+                 (tokens (clython.lexer:tokenize src))
+                 (ast (clython.parser:parse-module tokens))
+                 (body (clython.ast:module-node-body ast)))
+            ;; For eval(), if body is a single expr-stmt, return the expression value
+            (if (and (= (length body) 1)
+                     (typep (first body) 'clython.ast:expr-stmt-node))
+                (return-from eval-node
+                  (eval-node (clython.ast:expr-stmt-node-value (first body)) env))
+                ;; Otherwise evaluate all statements, return last result
+                (let ((result clython.runtime:+py-none+))
+                  (dolist (stmt body)
+                    (setf result (eval-node stmt env)))
+                  (return-from eval-node result)))))
+        ;; exec(code_string) — parse and execute statements
+        (when (and (string= fname "exec")
+                   (= (length (clython.ast:call-node-args node)) 1))
+          (let* ((arg (eval-node (first (clython.ast:call-node-args node)) env))
+                 (src (clython.runtime:py-str-value arg))
+                 (tokens (clython.lexer:tokenize src))
+                 (ast (clython.parser:parse-module tokens)))
+            (eval-node ast env)
+            (return-from eval-node clython.runtime:+py-none+))))))
   (let* ((func (eval-node (clython.ast:call-node-func node) env))
-         (args (mapcar (lambda (a) (eval-node a env))
-                       (clython.ast:call-node-args node)))
+         (args (loop for a in (clython.ast:call-node-args node)
+                     if (typep a 'clython.ast:starred-node)
+                       ;; Star unpacking: *args → splice the iterable into the arg list
+                       append (let ((val (eval-node (clython.ast:starred-node-value a) env)))
+                                (coerce (cond
+                                          ((typep val 'clython.runtime:py-list)
+                                           (clython.runtime:py-list-value val))
+                                          ((typep val 'clython.runtime:py-tuple)
+                                           (clython.runtime:py-tuple-value val))
+                                          (t (error "Cannot unpack ~A" val)))
+                                        'list))
+                     else
+                       collect (eval-node a env)))
          (kw-nodes (clython.ast:call-node-keywords node))
          ;; Evaluate keyword arguments into an alist ((name . value) ...)
          (kwargs (mapcar (lambda (kw)
@@ -497,11 +623,17 @@
 
 ;;; ─── Named expression (walrus operator) ────────────────────────────────────
 
+(defvar *comprehension-enclosing-env* nil
+  "When non-nil, walrus operator (:=) assigns to this env instead of the local scope.
+   Set by comprehension evaluation to the enclosing scope.")
+
 (defmethod eval-node ((node clython.ast:named-expr-node) env)
   (let* ((value (eval-node (clython.ast:named-expr-node-value node) env))
          (target (clython.ast:named-expr-node-target node))
-         (name (clython.ast:name-node-id target)))
-    (clython.scope:env-set name value env)
+         (name (clython.ast:name-node-id target))
+         ;; Walrus in comprehensions assigns to the enclosing scope
+         (target-env (or *comprehension-enclosing-env* env)))
+    (clython.scope:env-set name value target-env)
     value))
 
 ;;; ─── Lambda ─────────────────────────────────────────────────────────────────
@@ -514,6 +646,7 @@
   (let ((val (if (clython.ast:yield-node-value node)
                  (eval-node (clython.ast:yield-node-value node) env)
                  clython.runtime:+py-none+)))
+    ;; yield-fn returns the sent value (or py-none for next())
     (funcall *generator-yield-fn* val)))
 
 (defmethod eval-node ((node clython.ast:yield-from-node) env)
@@ -531,13 +664,17 @@
 ;;; ─── Lambda ───────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:lambda-node) env)
-  (let ((evaled-params (%eval-defaults (clython.ast:lambda-node-args node) env)))
+  (let* ((evaled-params (%eval-defaults (clython.ast:lambda-node-args node) env))
+         (body (list (make-instance 'clython.ast:return-node
+                                    :value (clython.ast:lambda-node-body node)))))
     (clython.runtime:make-py-function
      :name "<lambda>"
      :params evaled-params
-     :body (list (make-instance 'clython.ast:return-node
-                                :value (clython.ast:lambda-node-body node)))
-     :env env)))
+     :body body
+     :env env
+     :cl-fn (lambda (&rest args)
+              (%call-user-function-from-cl-fn
+               evaled-params body env args nil)))))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Comprehensions
@@ -589,33 +726,36 @@
 (defmethod eval-node ((node clython.ast:list-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
         (results '()))
-    (%eval-comprehension-generators
-     (clython.ast:list-comp-node-generators node)
-     (lambda ()
-       (push (eval-node (clython.ast:list-comp-node-elt node) comp-env) results))
-     comp-env)
+    (let ((*comprehension-enclosing-env* env))
+      (%eval-comprehension-generators
+       (clython.ast:list-comp-node-generators node)
+       (lambda ()
+         (push (eval-node (clython.ast:list-comp-node-elt node) comp-env) results))
+       comp-env))
     (clython.runtime:make-py-list (nreverse results))))
 
 (defmethod eval-node ((node clython.ast:set-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
         (results '()))
-    (%eval-comprehension-generators
-     (clython.ast:set-comp-node-generators node)
-     (lambda ()
-       (push (eval-node (clython.ast:set-comp-node-elt node) comp-env) results))
-     comp-env)
+    (let ((*comprehension-enclosing-env* env))
+      (%eval-comprehension-generators
+       (clython.ast:set-comp-node-generators node)
+       (lambda ()
+         (push (eval-node (clython.ast:set-comp-node-elt node) comp-env) results))
+       comp-env))
     (clython.runtime:make-py-set (nreverse results))))
 
 (defmethod eval-node ((node clython.ast:dict-comp-node) env)
   (let ((comp-env (clython.scope:env-extend env))
         (d (clython.runtime:make-py-dict)))
-    (%eval-comprehension-generators
-     (clython.ast:dict-comp-node-generators node)
-     (lambda ()
-       (let ((k (eval-node (clython.ast:dict-comp-node-key node) comp-env))
-             (v (eval-node (clython.ast:dict-comp-node-value node) comp-env)))
-         (clython.runtime:py-setitem d k v)))
-     comp-env)
+    (let ((*comprehension-enclosing-env* env))
+      (%eval-comprehension-generators
+       (clython.ast:dict-comp-node-generators node)
+       (lambda ()
+         (let ((k (eval-node (clython.ast:dict-comp-node-key node) comp-env))
+               (v (eval-node (clython.ast:dict-comp-node-value node) comp-env)))
+           (clython.runtime:py-setitem d k v)))
+       comp-env))
     d))
 
 (defmethod eval-node ((node clython.ast:generator-exp-node) env)
@@ -706,12 +846,35 @@
 
 ;;; ─── Augmented assignment ──────────────────────────────────────────────────
 
+(defun %iop-dunder-name (op)
+  "Return the in-place dunder name for augmented assignment op keyword, or NIL."
+  (case op
+    (:add       "__iadd__")
+    (:sub       "__isub__")
+    (:mult      "__imul__")
+    (:div       "__itruediv__")
+    (:floor-div "__ifloordiv__")
+    (:mod       "__imod__")
+    (:pow       "__ipow__")
+    (:bit-and   "__iand__")
+    (:bit-or    "__ior__")
+    (:bit-xor   "__ixor__")
+    (:l-shift   "__ilshift__")
+    (:r-shift   "__irshift__")
+    (otherwise nil)))
+
 (defmethod eval-node ((node clython.ast:aug-assign-node) env)
   (let* ((target (clython.ast:aug-assign-node-target node))
          (op (clython.ast:aug-assign-node-op node))
          (rhs (eval-node (clython.ast:aug-assign-node-value node) env))
          (current (eval-node target env))
-         (new-val (%binop-dispatch op current rhs)))
+         ;; Try in-place dunder first (e.g. __iadd__ for +=)
+         (iop-name (%iop-dunder-name op))
+         (iop-fn (when (and iop-name (typep current 'clython.runtime:py-object))
+                   (clython.runtime:%lookup-dunder current iop-name)))
+         (new-val (if iop-fn
+                      (clython.runtime:py-call iop-fn current rhs)
+                      (%binop-dispatch op current rhs))))
     (%assign-target target new-val env)
     clython.runtime:+py-none+))
 
@@ -849,10 +1012,21 @@
 
 ;;; ─── Function definition ──────────────────────────────────────────────────
 
+(defun %extract-docstring (body)
+  "If the first statement in BODY is a string constant (expr-stmt of a constant-node), return its value (unquoted)."
+  (when body
+    (let ((first-stmt (first body)))
+      (when (typep first-stmt 'clython.ast:expr-stmt-node)
+        (let ((val (clython.ast:expr-stmt-node-value first-stmt)))
+          (when (and (typep val 'clython.ast:constant-node)
+                     (stringp (clython.ast:constant-node-value val)))
+            (%unquote-string (clython.ast:constant-node-value val))))))))
+
 (defmethod eval-node ((node clython.ast:function-def-node) env)
   (let* ((name (clython.ast:function-def-node-name node))
          (params (clython.ast:function-def-node-args node))
          (body (%sort-body (clython.ast:function-def-node-body node)))
+         (docstring (%extract-docstring body))
          ;; Evaluate default values now (at definition time)
          (evaled-params (%eval-defaults params env))
          (is-generator (%ast-contains-yield-p body))
@@ -862,6 +1036,7 @@
                 :body body
                 :env env
                 :generator is-generator
+                :docstring docstring
                 :cl-fn (lambda (&rest args)
                          ;; This closure makes py-call work for user-defined functions
                          ;; (needed for decorators, first-class function passing via py-call)
@@ -982,6 +1157,91 @@
         (eval-node stmt env)))
     clython.runtime:+py-none+))
 
+;;; ─── With statement ────────────────────────────────────────────────────────
+
+(defmethod eval-node ((node clython.ast:with-node) env)
+  (let ((items (clython.ast:with-node-items node))
+        (body  (clython.ast:with-node-body node)))
+    (%eval-with-items items body env)))
+
+(defun %eval-with-items (items body env)
+  "Evaluate with items recursively (for multiple context managers in one with)."
+  (if (null items)
+      ;; All context managers entered — execute body
+      (progn
+        (dolist (stmt body)
+          (eval-node stmt env))
+        clython.runtime:+py-none+)
+      (let* ((item (first items))
+             (ctx-expr (clython.ast:with-item-context-expr item))
+             (opt-var  (clython.ast:with-item-optional-vars item))
+             (ctx-mgr  (eval-node ctx-expr env))
+             ;; Call __enter__
+             (enter-method (clython.runtime:py-getattr ctx-mgr "__enter__"))
+             (enter-val    (clython.runtime:py-call enter-method)))
+        ;; Bind the result if 'as' variable present
+        (when opt-var
+          (%assign-target opt-var enter-val env))
+        ;; Execute body, then call __exit__
+        (let ((exc-info nil)
+              (result nil))
+          (handler-case
+              (setf result (%eval-with-items (rest items) body env))
+            ;; Catch Python exceptions
+            (py-exception (e)
+              (setf exc-info e))
+            (clython.runtime:py-runtime-error (e)
+              (setf exc-info e))
+            ;; Catch return signals — need to still call __exit__
+            (py-return-value (ret)
+              (setf exc-info ret)))
+          ;; Call __exit__
+          (let* ((exit-method (clython.runtime:py-getattr ctx-mgr "__exit__"))
+                 (exit-result
+                   (cond
+                     ;; Python exception
+                     ((typep exc-info 'py-exception)
+                      (let ((exc-val (py-exception-value exc-info)))
+                        (clython.runtime:py-call
+                         exit-method
+                         ;; exc_type: the type/class
+                         (if (typep exc-val 'clython.runtime:py-exception-object)
+                             (clython.runtime:make-py-type
+                              :name (clython.runtime:py-exception-class-name exc-val))
+                             clython.runtime:+py-none+)
+                         ;; exc_val: the exception instance
+                         (if (typep exc-val 'clython.runtime:py-exception-object)
+                             exc-val
+                             clython.runtime:+py-none+)
+                         ;; exc_tb: traceback (not implemented)
+                         clython.runtime:+py-none+)))
+                     ;; Runtime error
+                     ((typep exc-info 'clython.runtime:py-runtime-error)
+                      (clython.runtime:py-call exit-method
+                                               clython.runtime:+py-true+
+                                               clython.runtime:+py-none+
+                                               clython.runtime:+py-none+))
+                     ;; Return signal or no exception
+                     (t
+                      (clython.runtime:py-call exit-method
+                                               clython.runtime:+py-none+
+                                               clython.runtime:+py-none+
+                                               clython.runtime:+py-none+)))))
+            ;; Handle exception suppression
+            (cond
+              ;; Return signal — re-signal after __exit__
+              ((typep exc-info 'py-return-value)
+               (signal exc-info))
+              ;; Exception — suppress if __exit__ returned truthy
+              ((and exc-info (clython.runtime:py-bool-val exit-result))
+               ;; Exception suppressed
+               nil)
+              ;; Exception — not suppressed, re-raise
+              (exc-info
+               (error exc-info))
+              ;; No exception
+              (t result)))))))
+
 ;;; ─── Async with ────────────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:async-with-node) env)
@@ -1034,17 +1294,42 @@
               (error exc))))
         clython.runtime:+py-none+)))
 
+(defun %maybe-register-exception-class (name bases)
+  "If any base class is in the exception hierarchy, register NAME as an exception subclass."
+  (dolist (base bases)
+    (let ((base-name (cond
+                       ((typep base 'clython.runtime:py-type)
+                        (clython.runtime:py-type-name base))
+                       ((typep base 'clython.runtime:py-function)
+                        (clython.runtime:py-function-name base))
+                       (t nil))))
+      (when (and base-name (gethash base-name clython.runtime:*exception-hierarchy*))
+        ;; Build MRO: self + base's MRO
+        (let ((base-mro (gethash base-name clython.runtime:*exception-hierarchy*)))
+          (setf (gethash name clython.runtime:*exception-hierarchy*)
+                (cons name base-mro)))
+        (return)))))
+
 ;;; ─── Class definition ──────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:class-def-node) env)
   (let* ((name (clython.ast:class-def-node-name node))
-         (bases (mapcar (lambda (b) (eval-node b env))
-                        (clython.ast:class-def-node-bases node)))
+         (explicit-bases (mapcar (lambda (b) (eval-node b env))
+                                (clython.ast:class-def-node-bases node)))
+         ;; If no explicit bases, implicitly inherit from object
+         (bases (if explicit-bases explicit-bases
+                    (let ((obj-type (clython.scope:env-get "object" env)))
+                      (if obj-type (list obj-type) nil))))
          (class-env (clython.scope:env-extend env))
          (class-dict (make-hash-table :test #'equal)))
     ;; Execute class body in class scope
-    (dolist (stmt (%sort-body (clython.ast:class-def-node-body node)))
-      (eval-node stmt class-env))
+    (let ((sorted-body (%sort-body (clython.ast:class-def-node-body node))))
+      ;; Extract docstring
+      (let ((docstring (%extract-docstring sorted-body)))
+        (when docstring
+          (setf (gethash "__doc__" class-dict) (clython.runtime:make-py-str docstring))))
+      (dolist (stmt sorted-body)
+        (eval-node stmt class-env)))
     ;; Copy bindings from class scope into class dict
     (maphash (lambda (k v) (setf (gethash k class-dict) v))
              (clython.scope:env-bindings class-env))
@@ -1058,7 +1343,14 @@
                      (when fn-env
                        (clython.scope:env-set "__class__" cls fn-env)))))
                class-dict)
-      (clython.scope:env-set name cls env))
+      ;; Register in exception hierarchy if any base is an exception class
+      (%maybe-register-exception-class name bases)
+      ;; Apply decorators (in reverse order)
+      (let ((decorated cls))
+        (dolist (dec-node (reverse (clython.ast:class-def-node-decorator-list node)))
+          (let ((dec-fn (eval-node dec-node env)))
+            (setf decorated (clython.runtime:py-call dec-fn decorated))))
+        (clython.scope:env-set name decorated env)))
     clython.runtime:+py-none+))
 
 ;;; ─── Pass / Break / Continue ────────────────────────────────────────────────
@@ -1079,13 +1371,59 @@
 
 ;;; ─── Raise ──────────────────────────────────────────────────────────────────
 
+(defun %is-exception-class-p (obj)
+  "Check if OBJ is a py-type or py-function that represents an exception class."
+  (cond
+    ((typep obj 'clython.runtime:py-type)
+     (let ((name (clython.runtime:py-type-name obj)))
+       (gethash name clython.runtime:*exception-hierarchy*)))
+    ((typep obj 'clython.runtime:py-function)
+     (let ((name (clython.runtime:py-function-name obj)))
+       (gethash name clython.runtime:*exception-hierarchy*)))
+    (t nil)))
+
+(defun %py-object-to-exception (obj)
+  "Convert a py-object whose class is in the exception hierarchy to a py-exception-object."
+  (let* ((cls (clython.runtime:py-object-class obj))
+         (class-name (when (typep cls 'clython.runtime:py-type)
+                       (clython.runtime:py-type-name cls))))
+    (if (and class-name (gethash class-name clython.runtime:*exception-hierarchy*))
+        ;; Build a py-exception-object with the user object's attributes
+        (let ((exc-obj (clython.runtime:make-py-exception-object class-name)))
+          ;; Copy instance dict for attribute access
+          (let ((src-dict (clython.runtime:py-object-dict obj))
+                (dst-dict (clython.runtime:py-object-dict exc-obj)))
+            (when (and src-dict dst-dict)
+              (maphash (lambda (k v) (setf (gethash k dst-dict) v))
+                       src-dict)))
+          exc-obj)
+        obj)))
+
 (defmethod eval-node ((node clython.ast:raise-node) env)
   (if (clython.ast:raise-node-exc node)
       (let ((exc (eval-node (clython.ast:raise-node-exc node) env)))
-        ;; If exc is a py-function (exception class), call it with no args
-        (when (and (typep exc 'clython.runtime:py-function)
+        ;; If exc is a py-type/py-function (exception class), call it with no args
+        (when (and (or (typep exc 'clython.runtime:py-function)
+                       (typep exc 'clython.runtime:py-type))
                    (not (typep exc 'clython.runtime:py-exception-object)))
           (setf exc (clython.runtime:py-call exc)))
+        ;; If exc is a py-object from a user-defined exception class, convert it
+        (when (and (typep exc 'clython.runtime:py-object)
+                   (not (typep exc 'clython.runtime:py-exception-object)))
+          (setf exc (%py-object-to-exception exc)))
+        ;; Handle `raise X from Y` — set __cause__
+        (when (clython.ast:raise-node-cause node)
+          (let ((cause (eval-node (clython.ast:raise-node-cause node) env)))
+            (when (and (or (typep cause 'clython.runtime:py-function)
+                           (typep cause 'clython.runtime:py-type))
+                       (not (typep cause 'clython.runtime:py-exception-object)))
+              (setf cause (clython.runtime:py-call cause)))
+            (when (and (typep cause 'clython.runtime:py-object)
+                       (not (typep cause 'clython.runtime:py-exception-object)))
+              (setf cause (%py-object-to-exception cause)))
+            ;; Store cause on the exception object for __cause__ access
+            (when (typep exc 'clython.runtime:py-exception-object)
+              (setf (gethash "__cause__" (clython.runtime:py-object-dict exc)) cause))))
         (error 'py-exception :value exc))
       ;; bare raise — re-raise current exception if available
       (let ((current *current-exception*))
@@ -1096,26 +1434,42 @@
 
 ;;; ─── Try / Except ──────────────────────────────────────────────────────────
 
+(defun %exception-matches-single-type-p (exc-value handler-type)
+  "Check if exc-value matches a single handler type (a py-function or py-type)."
+  (let ((handler-name (cond
+                        ((typep handler-type 'clython.runtime:py-function)
+                         (clython.runtime:py-function-name handler-type))
+                        ((typep handler-type 'clython.runtime:py-type)
+                         (clython.runtime:py-type-name handler-type))
+                        (t nil))))
+    (when handler-name
+      (cond
+        ;; exc-value is a py-exception-object — check hierarchy
+        ((typep exc-value 'clython.runtime:py-exception-object)
+         (clython.runtime:exception-is-subclass-p
+          (clython.runtime:py-exception-class-name exc-value)
+          handler-name))
+        ;; exc-value is a string (legacy) — check if handler name appears
+        ((typep exc-value 'clython.runtime:py-str)
+         (search handler-name (clython.runtime:py-str-value exc-value)))
+        ;; fallback
+        (t nil)))))
+
 (defun %exception-matches-handler-p (exc-value handler-type-node env)
   "Check if an exception value matches the type in a handler's except clause.
-   HANDLER-TYPE-NODE is the AST node for the exception type (or NIL for bare except)."
+   HANDLER-TYPE-NODE is the AST node for the exception type (or NIL for bare except).
+   Supports both single types and tuples of types: except (TypeError, ValueError)."
   (when (null handler-type-node)
     (return-from %exception-matches-handler-p t))
   (let ((handler-type (eval-node handler-type-node env)))
-    ;; handler-type should be a py-function (exception constructor) with a name
-    (when (typep handler-type 'clython.runtime:py-function)
-      (let ((handler-name (clython.runtime:py-function-name handler-type)))
-        (cond
-          ;; exc-value is a py-exception-object — check hierarchy
-          ((typep exc-value 'clython.runtime:py-exception-object)
-           (clython.runtime:exception-is-subclass-p
-            (clython.runtime:py-exception-class-name exc-value)
-            handler-name))
-          ;; exc-value is a string (legacy) — check if handler name appears
-          ((typep exc-value 'clython.runtime:py-str)
-           (search handler-name (clython.runtime:py-str-value exc-value)))
-          ;; fallback
-          (t nil))))))
+    (cond
+      ;; Tuple of exception types — match any
+      ((typep handler-type 'clython.runtime:py-tuple)
+       (some (lambda (etype)
+               (%exception-matches-single-type-p exc-value etype))
+             (coerce (clython.runtime:py-tuple-value handler-type) 'list)))
+      ;; Single exception type
+      (t (%exception-matches-single-type-p exc-value handler-type)))))
 
 (defun %handle-exception (exc-val handlers node env)
   "Try to match exc-val against handlers. Returns T if handled, NIL otherwise.
@@ -1138,36 +1492,40 @@
     handled))
 
 (defmethod eval-node ((node clython.ast:try-node) env)
-  (let ((caught nil))
-    (handler-case
-        (progn
-          (dolist (stmt (%sort-body (clython.ast:try-node-body node)))
-            (eval-node stmt env)))
-      (py-exception (e)
-        (setf caught t)
-        (let* ((*current-exception* e)
-               (exc-val (py-exception-value e)))
-          (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
-            (error e))))
-      (clython.runtime:py-runtime-error (e)
-        (setf caught t)
-        ;; Convert runtime error to a py-exception-object for uniform handling
-        (let* ((exc-val (clython.runtime:make-py-exception-object
-                         (clython.runtime:py-runtime-error-class-name e)
-                         (list (clython.runtime:make-py-str
-                                (clython.runtime:py-runtime-error-message e)))))
-               (wrapper (make-condition 'py-exception :value exc-val))
-               (*current-exception* wrapper))
-          (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
-            (error e)))))
-    ;; else clause (runs if no exception was raised)
-    (unless caught
-      (dolist (stmt (%sort-body (clython.ast:try-node-orelse node)))
-        (eval-node stmt env)))
-    ;; finally clause (always runs)
-    (dolist (stmt (%sort-body (clython.ast:try-node-finalbody node)))
-      (eval-node stmt env)))
-  clython.runtime:+py-none+)
+  (let ((has-finally (clython.ast:try-node-finalbody node)))
+    (flet ((%try-body ()
+             (let ((caught nil))
+               (handler-case
+                   (progn
+                     (dolist (stmt (%sort-body (clython.ast:try-node-body node)))
+                       (eval-node stmt env)))
+                 (py-exception (e)
+                   (setf caught t)
+                   (let* ((*current-exception* e)
+                          (exc-val (py-exception-value e)))
+                     (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
+                       (error e))))
+                 (clython.runtime:py-runtime-error (e)
+                   (setf caught t)
+                   (let* ((exc-val (clython.runtime:make-py-exception-object
+                                    (clython.runtime:py-runtime-error-class-name e)
+                                    (list (clython.runtime:make-py-str
+                                           (clython.runtime:py-runtime-error-message e)))))
+                          (wrapper (make-condition 'py-exception :value exc-val))
+                          (*current-exception* wrapper))
+                     (unless (%handle-exception exc-val (clython.ast:try-node-handlers node) node env)
+                       (error e)))))
+               ;; else clause (runs if no exception was raised)
+               (unless caught
+                 (dolist (stmt (%sort-body (clython.ast:try-node-orelse node)))
+                   (eval-node stmt env)))
+               clython.runtime:+py-none+)))
+      (if has-finally
+          (unwind-protect
+              (%try-body)
+            (dolist (stmt (%sort-body (clython.ast:try-node-finalbody node)))
+              (eval-node stmt env)))
+          (%try-body)))))
 
 ;;; ─── Import ─────────────────────────────────────────────────────────────────
 
@@ -1269,23 +1627,158 @@
             (mapcar #'clython.runtime:py-str-of parts)))))
 
 (defmethod eval-node ((node clython.ast:formatted-value-node) env)
-  (let ((val (eval-node (clython.ast:formatted-value-node-value node) env)))
-    ;; Simplified: just convert to string (ignoring conversion/format-spec)
-    (clython.runtime:make-py-str (clython.runtime:py-str-of val))))
+  (let* ((val (eval-node (clython.ast:formatted-value-node-value node) env))
+         (conv (clython.ast:formatted-value-node-conversion node))
+         (fmt-spec-node (clython.ast:formatted-value-node-format-spec node))
+         (converted
+           (cond
+             ((eql conv 115) (clython.runtime:py-str-of val))   ; !s
+             ((eql conv 114) (clython.runtime:py-repr val))     ; !r
+             ((eql conv 97)  (clython.runtime:py-repr val))     ; !a
+             (t nil)))
+         (fmt-spec
+           (when fmt-spec-node
+             (clython.runtime:py-str-value (eval-node fmt-spec-node env)))))
+    (if (and fmt-spec (plusp (length fmt-spec)))
+        (clython.runtime:make-py-str (apply-python-format-spec val fmt-spec converted))
+        (clython.runtime:make-py-str (or converted (clython.runtime:py-str-of val))))))
+
+(defun apply-python-format-spec (val spec &optional converted-str)
+  "Apply a Python format spec string to a value, returning a formatted string."
+  (let* ((len (length spec))
+         (pos 0)
+         (fill-char #\Space)
+         (align nil)
+         (zero-pad nil)
+         (width nil)
+         (precision nil)
+         (type-char nil))
+    ;; Parse fill+align or just align
+    (when (and (>= len 2)
+               (member (char spec 1) '(#\< #\> #\^ #\=)))
+      (setf fill-char (char spec 0)
+            align (char spec 1)
+            pos 2))
+    (when (and (null align) (plusp len)
+               (member (char spec 0) '(#\< #\> #\^ #\=)))
+      (setf align (char spec 0)
+            pos 1))
+    ;; Sign
+    (when (and (< pos len) (member (char spec pos) '(#\+ #\- #\Space)))
+      (incf pos))
+    ;; Zero padding
+    (when (and (< pos len) (char= (char spec pos) #\0))
+      (setf zero-pad t)
+      (when (null align) (setf align #\=))
+      (when (char= fill-char #\Space) (setf fill-char #\0))
+      (incf pos))
+    ;; Width
+    (let ((start pos))
+      (loop while (and (< pos len) (digit-char-p (char spec pos))) do (incf pos))
+      (when (> pos start)
+        (setf width (parse-integer (subseq spec start pos)))))
+    ;; Precision
+    (when (and (< pos len) (char= (char spec pos) #\.))
+      (incf pos)
+      (let ((start pos))
+        (loop while (and (< pos len) (digit-char-p (char spec pos))) do (incf pos))
+        (when (> pos start)
+          (setf precision (parse-integer (subseq spec start pos))))))
+    ;; Type character
+    (when (< pos len)
+      (setf type-char (char spec pos)))
+    ;; Format the value
+    (let* ((num-val (typecase val
+                      (clython.runtime:py-int (clython.runtime:py-int-value val))
+                      (clython.runtime:py-float (clython.runtime:py-float-value val))
+                      (t nil)))
+           (raw
+             (cond
+               ((and converted-str (null type-char)) converted-str)
+               ((and type-char (char= type-char #\d))
+                (format nil "~D" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\x))
+                (format nil "~(~X~)" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\X))
+                (format nil "~X" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\o))
+                (format nil "~O" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\b))
+                (format nil "~B" (if num-val (truncate num-val) 0)))
+               ((and type-char (char= type-char #\f))
+                (let ((p (or precision 6))
+                      (n (if num-val (float num-val 1.0d0) 0.0d0)))
+                  (format nil "~,vF" p n)))
+               ((and type-char (char= type-char #\e))
+                (let ((p (or precision 6))
+                      (n (if num-val (float num-val 1.0d0) 0.0d0)))
+                  (format nil "~,vE" p n)))
+               ((and type-char (char= type-char #\s))
+                (let ((s (or converted-str (clython.runtime:py-str-of val))))
+                  (if precision (subseq s 0 (min precision (length s))) s)))
+               (t
+                (cond
+                  ((and precision num-val)
+                   (format nil "~,vF" precision (float num-val 1.0d0)))
+                  (converted-str converted-str)
+                  (t (clython.runtime:py-str-of val)))))))
+      ;; Apply width/alignment
+      (if (and width (> width (length raw)))
+          (let ((pad-amount (- width (length raw)))
+                (effective-align (or align (if num-val #\> #\<))))
+            (cond
+              ((char= effective-align #\<)
+               (concatenate 'string raw (make-string pad-amount :initial-element fill-char)))
+              ((char= effective-align #\>)
+               (concatenate 'string (make-string pad-amount :initial-element fill-char) raw))
+              ((char= effective-align #\^)
+               (let ((left (floor pad-amount 2))
+                     (right (ceiling pad-amount 2)))
+                 (concatenate 'string
+                              (make-string left :initial-element fill-char)
+                              raw
+                              (make-string right :initial-element fill-char))))
+              ((char= effective-align #\=)
+               (if (and (plusp (length raw))
+                        (member (char raw 0) '(#\+ #\- #\Space)))
+                   (concatenate 'string
+                                (string (char raw 0))
+                                (make-string pad-amount :initial-element fill-char)
+                                (subseq raw 1))
+                   (concatenate 'string (make-string pad-amount :initial-element fill-char) raw)))
+              (t raw)))
+          raw))))
 
 ;;; ─── Type alias (stub) ─────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:type-alias-node) env)
-  (declare (ignore env))
-  clython.runtime:+py-none+)
+  ;; PEP 695 type alias — bind type params as TypeVar stubs, eval value, bind name
+  (let* ((name (clython.ast:type-alias-node-name node))
+         (type-params (clython.ast:type-alias-node-type-params node))
+         ;; Create a child scope so type param bindings don't leak
+         (inner-env (clython.scope:env-extend env)))
+    ;; Bind each type param as a string placeholder (acts as a TypeVar name)
+    (dolist (tp type-params)
+      (clython.scope:env-set tp (clython.runtime:make-py-str tp) inner-env))
+    (let ((value (eval-node (clython.ast:type-alias-node-value node) inner-env)))
+      (clython.scope:env-set name value env)
+      clython.runtime:+py-none+)))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Match statement (PEP 634)
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
+(defun %match-class-subtype-p (cls target)
+  "Check if CLS is TARGET or has TARGET as an ancestor in its bases."
+  (when (typep cls 'clython.runtime:py-type)
+    (or (eq cls target)
+        (some (lambda (base) (%match-class-subtype-p base target))
+              (clython.runtime:py-type-bases cls)))))
+
 (defun %match-pattern (subject pattern env)
   "Try to match SUBJECT (a py-object) against PATTERN (an AST pattern node).
    Returns T if matched, NIL otherwise. On match, binds captured names in ENV."
+  ;; (format t "~&DEBUG match-pattern: pattern-type=~S~%" (type-of pattern))
   (typecase pattern
     ;; Wildcard or capture: match-as-node with pattern=NIL
     (clython.ast:match-as-node
@@ -1355,7 +1848,7 @@
                  ;; Match after star
                  (loop for i from 1 to after-count
                        for pat = (nth (+ star-idx i) sub-patterns)
-                       for elem = (nth (- (length elems) after-count (- i)) elems)
+                       for elem = (nth (+ (- (length elems) after-count) (1- i)) elems)
                        unless (%match-pattern elem pat env)
                          do (return-from %match-pattern nil))
                  t)
@@ -1381,16 +1874,80 @@
      (when (typep subject 'clython.runtime:py-dict)
        (let ((keys (clython.ast:match-mapping-node-keys pattern))
              (pats (clython.ast:match-mapping-node-patterns pattern))
-             (ht   (clython.runtime:py-dict-value subject)))
-         (loop for key-node in keys
-               for pat in pats
-               for key-val = (eval-node key-node env)
-               always (multiple-value-bind (val found)
-                          (gethash (clython.runtime::dict-hash-key key-val) ht)
-                        (and found (%match-pattern val pat env)))))))
+             (rest-name (clython.ast:match-mapping-node-rest pattern))
+             (ht   (clython.runtime:py-dict-value subject))
+             (matched-keys '()))
+         ;; All specified keys must be present and match
+         (unless (loop for key-node in keys
+                       for pat in pats
+                       for key-val = (eval-node key-node env)
+                       for hk = (clython.runtime::dict-hash-key key-val)
+                       always (multiple-value-bind (val found) (gethash hk ht)
+                                (when found
+                                  (push hk matched-keys)
+                                  (%match-pattern val pat env))))
+           (return-from %match-pattern nil))
+         ;; Bind **rest if specified
+         (when rest-name
+           (let ((rest-dict (make-hash-table :test #'equal)))
+             (maphash (lambda (k v)
+                        (unless (member k matched-keys :test #'equal)
+                          (setf (gethash k rest-dict) v)))
+                      ht)
+             (clython.scope:env-set rest-name
+                                    (clython.runtime:make-py-dict rest-dict)
+                                    env)))
+         t)))
 
-    ;; Class pattern (not yet fully supported)
-    (clython.ast:match-class-node nil)
+    ;; Class pattern — match subject against a class, bind positional/keyword args
+    (clython.ast:match-class-node
+     (let* ((cls-node (clython.ast:match-class-node-cls pattern))
+            (cls (eval-node cls-node env))
+            (pos-pats (clython.ast:match-class-node-patterns pattern))
+            (kwd-attrs (clython.ast:match-class-node-kwd-attrs pattern))
+            (kwd-pats (clython.ast:match-class-node-kwd-patterns pattern)))
+       ;; DEBUG
+         ;; debug removed
+       ;; Check isinstance
+       (when (and (typep subject 'clython.runtime:py-object)
+                  (let ((obj-cls (clython.runtime:py-object-class subject)))
+                    (or (eq obj-cls cls)
+                        (and (typep obj-cls 'clython.runtime:py-type)
+                             (typep cls 'clython.runtime:py-type)
+                             (%match-class-subtype-p obj-cls cls)))))
+         ;; Match positional patterns using __match_args__
+         (let ((all-match t))
+           ;; Positional args via __match_args__
+           (when pos-pats
+             (let* ((match-args-val (handler-case
+                                        (clython.runtime:py-getattr cls "__match_args__")
+                                      (error () nil)))
+                    (match-args (when (typep match-args-val 'clython.runtime:py-tuple)
+                                  (coerce (clython.runtime:py-tuple-value match-args-val) 'list))))
+               (loop for pat in pos-pats
+                     for i from 0
+                     while all-match
+                     do (if (< i (length match-args))
+                            (let* ((attr-name (clython.runtime:py-str-value (nth i match-args)))
+                                   (attr-val (handler-case
+                                                 (clython.runtime:py-getattr subject attr-name)
+                                               (error () (setf all-match nil) nil))))
+                              (when all-match
+                                (unless (%match-pattern attr-val pat env)
+                                  (setf all-match nil))))
+                            (setf all-match nil)))))
+           ;; Keyword args
+           (when (and all-match kwd-attrs)
+             (loop for attr-name in kwd-attrs
+                   for kwd-pat in kwd-pats
+                   while all-match
+                   do (let ((attr-val (handler-case
+                                          (clython.runtime:py-getattr subject attr-name)
+                                        (error () (setf all-match nil) nil))))
+                        (when all-match
+                          (unless (%match-pattern attr-val kwd-pat env)
+                            (setf all-match nil))))))
+           all-match))))
 
     (t nil)))
 

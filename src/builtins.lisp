@@ -17,6 +17,7 @@
    #:+builtin-str+
    #:+builtin-int+
    #:+builtin-float+
+   #:+builtin-complex+
    #:+builtin-bool+
    #:+builtin-type+
    #:+builtin-len+
@@ -29,6 +30,8 @@
    #:+builtin-set+
    #:+builtin-frozenset+
    #:+builtin-abs+
+   #:+builtin-round+
+   #:+builtin-import+
    #:+builtin-min+
    #:+builtin-max+
    #:+builtin-sum+
@@ -54,7 +57,11 @@
    #:+builtin-getattr+
    #:+builtin-setattr+
    #:+builtin-hasattr+
-   #:+builtin-delattr+))
+   #:+builtin-delattr+
+   #:+builtin-staticmethod+
+   #:+builtin-classmethod+
+   #:+builtin-property+
+#:+builtin-format+))
 
 (in-package :clython.builtins)
 
@@ -143,17 +150,94 @@
           ((typep obj 'py-int)   (make-py-float (float (py-int-value obj) 1.0d0)))
           ((typep obj 'py-bool)  (make-py-float (if (py-bool-raw obj) 1.0d0 0.0d0)))
           ((typep obj 'py-str)
-           (make-py-float (float (read-from-string (py-str-value obj)) 1.0d0)))
+           (let ((s (string-trim '(#\Space #\Tab #\Newline) (py-str-value obj))))
+             (cond
+               ((string-equal s "nan")  (make-py-float (sb-kernel:make-double-float #x7FF80000 0)))
+               ((string-equal s "inf")  (make-py-float sb-ext:double-float-positive-infinity))
+               ((string-equal s "+inf") (make-py-float sb-ext:double-float-positive-infinity))
+               ((string-equal s "-inf") (make-py-float sb-ext:double-float-negative-infinity))
+               (t (make-py-float (float (read-from-string s) 1.0d0))))))
           (t (clython.runtime:py-raise "TypeError" "float() argument must be a string or a real number, not '~A'"
                     (py-type-of obj)))))))
+
+(defbuiltin +builtin-complex+ "complex" (&rest args)
+  (cond
+    ((null args) (make-py-complex #C(0.0d0 0.0d0)))
+    ((= (length args) 1)
+     (let ((obj (first args)))
+       (cond
+         ((typep obj 'py-complex) obj)
+         ((typep obj 'py-int)   (make-py-complex (complex (float (py-int-value obj) 1.0d0) 0.0d0)))
+         ((typep obj 'py-float) (make-py-complex (complex (py-float-value obj) 0.0d0)))
+         ((typep obj 'py-bool)  (make-py-complex (complex (if (py-bool-raw obj) 1.0d0 0.0d0) 0.0d0)))
+         ((typep obj 'py-str)
+          (let ((s (string-trim '(#\Space #\Tab #\Newline) (py-str-value obj))))
+            ;; Simple parsing: handle "1+2j", "3j", "4", etc.
+            ;; Delegate to CL reader after stripping j
+            (handler-case
+                (let ((val (read-from-string (substitute #\d #\j (substitute #\D #\J s)))))
+                  (make-py-complex (coerce val '(complex double-float))))
+              (error () (py-raise "ValueError" "complex() arg is a malformed string")))))
+         (t (py-raise "TypeError" "complex() first argument must be a string or a number")))))
+    ((= (length args) 2)
+     (let ((real-val (let ((r (first args)))
+                       (cond ((typep r 'py-int) (float (py-int-value r) 1.0d0))
+                             ((typep r 'py-float) (py-float-value r))
+                             ((typep r 'py-bool) (if (py-bool-raw r) 1.0d0 0.0d0))
+                             (t (py-raise "TypeError" "complex() first argument must be a number")))))
+           (imag-val (let ((i (second args)))
+                       (cond ((typep i 'py-int) (float (py-int-value i) 1.0d0))
+                             ((typep i 'py-float) (py-float-value i))
+                             ((typep i 'py-bool) (if (py-bool-raw i) 1.0d0 0.0d0))
+                             (t (py-raise "TypeError" "complex() second argument must be a number"))))))
+       (make-py-complex (complex real-val imag-val))))
+    (t (py-raise "TypeError" "complex() takes at most 2 arguments"))))
 
 (defbuiltin +builtin-bool+ "bool" (&rest args)
   (if (null args)
       +py-false+
       (py-bool-from-cl (py-bool-val (first args)))))
 
-(defbuiltin +builtin-type+ "type" (obj)
-  (make-py-type :name (py-type-of obj)))
+(defvar *type-type* (make-py-type :name "type")
+  "Canonical 'type' type object for type(type) is type.")
+
+(defbuiltin +builtin-type+ "type" (&rest args)
+  (cond
+    ;; type(obj) — return the type
+    ((= (length args) 1)
+     (let* ((obj (first args))
+            (cls (py-object-class obj)))
+       (cond
+         ;; User-defined class instances: return their class
+         ((typep cls 'py-type) cls)
+         ;; py-type objects: type(SomeClass) → type
+         ((typep obj 'py-type)
+          (or *type-type* (make-py-type :name "type")))
+         ;; py-function representing a builtin type → type
+         ((and (typep obj 'py-function)
+               (member (py-function-name obj)
+                       '("int" "str" "float" "bool" "list" "tuple" "dict"
+                         "set" "frozenset" "bytes" "type" "object" "complex"
+                         "range" "enumerate" "zip" "map" "filter" "reversed"
+                         "super" "property" "staticmethod" "classmethod")
+                       :test #'string=))
+          (or *type-type* (make-py-type :name "type")))
+         ;; Default
+         (t (make-py-type :name (py-type-of obj))))))
+    ;; type(name, bases, dict) — create a new class
+    ((= (length args) 3)
+     (let* ((name-obj (first args))
+            (bases-obj (second args))
+            (dict-obj (third args))
+            (name (py-str-value name-obj))
+            (bases (coerce (py-tuple-value bases-obj) 'list))
+            (tdict (make-hash-table :test #'equal)))
+       ;; Copy dict entries
+       (maphash (lambda (k v)
+                  (setf (gethash k tdict) v))
+                (py-dict-value dict-obj))
+       (make-py-type :name name :bases bases :tdict tdict)))
+    (t (py-raise "TypeError" "type() takes 1 or 3 arguments"))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; len
@@ -207,10 +291,50 @@
               (let ((obj-cls (py-object-class obj)))
                 (%is-subtype-p obj-cls typeobj)))))))
 
+(defvar *builtin-type-hierarchy* (make-hash-table :test #'equal)
+  "Maps builtin type name → list of parent type names (MRO-like).")
+
+(defun %register-builtin-type-hierarchy ()
+  (let ((tree '(("object"     . ())
+                ("type"       . ("object"))
+                ("int"        . ("object"))
+                ("bool"       . ("int" "object"))
+                ("float"      . ("object"))
+                ("complex"    . ("object"))
+                ("str"        . ("object"))
+                ("bytes"      . ("object"))
+                ("list"       . ("object"))
+                ("tuple"      . ("object"))
+                ("dict"       . ("object"))
+                ("set"        . ("object"))
+                ("frozenset"  . ("object"))
+                ("NoneType"   . ("object"))
+                ("function"   . ("object")))))
+    (dolist (entry tree)
+      (setf (gethash (car entry) *builtin-type-hierarchy*)
+            (cons (car entry) (cdr entry))))))
+
+(%register-builtin-type-hierarchy)
+
 (defbuiltin +builtin-issubclass+ "issubclass" (subtype supertype)
-  ;; Simplified: compare type names
   (py-bool-from-cl
-   (string= (py-type-name subtype) (py-type-name supertype))))
+   (let ((sub-name (cond
+                     ((typep subtype 'py-type) (py-type-name subtype))
+                     ((typep subtype 'py-function) (py-function-name subtype))
+                     (t "")))
+         (super-name (cond
+                       ((typep supertype 'py-type) (py-type-name supertype))
+                       ((typep supertype 'py-function) (py-function-name supertype))
+                       (t ""))))
+     (or (string= sub-name super-name)
+         ;; Check user-defined class hierarchy
+         (and (typep subtype 'py-type)
+              (%is-subtype-p subtype supertype))
+         ;; Check built-in exception hierarchy
+         (clython.runtime:exception-is-subclass-p sub-name super-name)
+         ;; Check built-in type hierarchy
+         (let ((mro (gethash sub-name *builtin-type-hierarchy*)))
+           (when mro (member super-name mro :test #'string=)))))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; range
@@ -272,6 +396,26 @@
 
 (defbuiltin +builtin-abs+ "abs" (obj)
   (py-abs obj))
+
+(defbuiltin +builtin-round+ "round" (number &optional (ndigits nil ndigits-p))
+  (let ((val (cond
+               ((typep number 'py-int) (py-int-value number))
+               ((typep number 'py-float) (py-float-value number))
+               ((typep number 'py-bool) (if (eq number +py-true+) 1 0))
+               (t (py-raise "TypeError" "type ~A doesn't define __round__"
+                            (py-type-name number))))))
+    (if (or (not ndigits-p) (eq ndigits +py-none+))
+        ;; round(x) or round(x, None) → int
+        (make-py-int (round val))
+        ;; round(x, n) → float (or int if input was int)
+        (let ((n (cond
+                   ((typep ndigits 'py-int) (py-int-value ndigits))
+                   (t (py-raise "TypeError" "integer argument expected, got ~A"
+                                (py-type-name ndigits))))))
+          (let ((factor (expt 10.0d0 n)))
+            (if (typep number 'py-int)
+                (make-py-int (round val))
+                (make-py-float (/ (fround (* val factor)) factor))))))))
 
 (defbuiltin +builtin-min+ "min" (&rest args)
   (let ((items (if (and (= (length args) 1)
@@ -376,8 +520,10 @@
 (defbuiltin +builtin-sorted+ "sorted" (&rest args)
   (let* ((iterable (first args))
          (items (collect-iter iterable))
-         (key-fn (getf (rest args) :key nil))
-         (reverse-p (getf (rest args) :reverse nil))
+         (key-fn (or (cdr (assoc "key" *current-kwargs* :test #'string=))
+                     (getf (rest args) :key nil)))
+         (reverse-p (or (cdr (assoc "reverse" *current-kwargs* :test #'string=))
+                        (getf (rest args) :reverse nil)))
          (sorted (sort (copy-list items)
                        (lambda (a b)
                          (if key-fn
@@ -484,6 +630,35 @@
   +py-none+)
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; format
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+;; __import__ is registered dynamically after imports package loads
+;; (see register-import-builtin in imports.lisp)
+
+(defbuiltin +builtin-format+ "format" (obj &rest args)
+  (let ((spec (if args (py-str-value (first args)) "")))
+    ;; Try __format__ dunder
+    (let ((fn (%lookup-dunder obj "__format__")))
+      (if fn
+          (py-call fn obj (make-py-str spec))
+          ;; Default: use str()
+          (make-py-str (py-str-of obj))))))
+
+;;; staticmethod / classmethod / property
+
+(defbuiltin +builtin-staticmethod+ "staticmethod" (func)
+  (make-instance 'py-staticmethod-wrapper :function func))
+
+(defbuiltin +builtin-classmethod+ "classmethod" (func)
+  (make-instance 'py-classmethod-wrapper :function func))
+
+(defbuiltin +builtin-property+ "property" (&rest args)
+  (make-instance 'py-property-wrapper
+                 :fget (if (>= (length args) 1) (first args) nil)
+                 :fset (if (>= (length args) 2) (second args) nil)))
+
+;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Global builtins table
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
@@ -498,7 +673,7 @@
                (cons "int"          +builtin-int+)
                (cons "float"        +builtin-float+)
                (cons "bool"         +builtin-bool+)
-               (cons "type"         +builtin-type+)
+               (cons "type"         *type-type*)
                (cons "len"          +builtin-len+)
                (cons "isinstance"   +builtin-isinstance+)
                (cons "issubclass"   +builtin-issubclass+)
@@ -509,6 +684,7 @@
                (cons "set"          +builtin-set+)
                (cons "frozenset"    +builtin-frozenset+)
                (cons "abs"          +builtin-abs+)
+               (cons "round"        +builtin-round+)
                (cons "min"          +builtin-min+)
                (cons "max"          +builtin-max+)
                (cons "sum"          +builtin-sum+)
@@ -534,11 +710,25 @@
                (cons "getattr"      +builtin-getattr+)
                (cons "setattr"      +builtin-setattr+)
                (cons "hasattr"      +builtin-hasattr+)
-               (cons "delattr"      +builtin-delattr+))))
+               (cons "delattr"      +builtin-delattr+)
+               (cons "staticmethod" +builtin-staticmethod+)
+               (cons "classmethod"  +builtin-classmethod+)
+               (cons "property"     +builtin-property+)
+               (cons "format"       +builtin-format+)
+               (cons "complex"      +builtin-complex+)
+               (cons "object"       (make-py-type :name "object"))
+               ;; Constants
+               (cons "Ellipsis"     clython.runtime:+py-ellipsis+)
+               (cons "NotImplemented" clython.runtime:+py-none+)  ; stub for now
+               )))
     (dolist (pair pairs)
       (setf (gethash (car pair) *builtins*) (cdr pair)))))
 
 (%register-builtins)
+
+;; Cache object type for MRO computation
+(setf clython.runtime:*object-type*
+      (gethash "object" *builtins*))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Exception classes — registered as callable py-type objects in *builtins*

@@ -26,6 +26,13 @@
    #:py-frozenset
    #:py-function
    #:py-method
+   #:py-staticmethod-wrapper
+   #:py-staticmethod-function
+   #:py-classmethod-wrapper
+   #:py-classmethod-function
+   #:py-property-wrapper
+   #:py-property-fget
+   #:py-property-fset
    #:py-super
    #:make-py-super
    #:py-super-type
@@ -89,6 +96,8 @@
 
    ;; Singletons
    #:+py-none+
+   #:py-ellipsis
+   #:+py-ellipsis+
    #:+py-true+
    #:+py-false+
 
@@ -175,7 +184,10 @@
    #:py-runtime-error
    #:py-runtime-error-class-name
    #:py-runtime-error-message
-   #:py-raise))
+   #:py-raise
+   #:%lookup-dunder
+   #:*object-type*
+   #:%compute-c3-mro))
 
 (in-package :clython.runtime)
 
@@ -223,6 +235,12 @@
   (:documentation "Python None."))
 
 (defvar +py-none+ (make-instance 'py-none))
+
+;;; Ellipsis ---------------------------------------------------------------
+(defclass py-ellipsis (py-object) ()
+  (:documentation "Python Ellipsis (...)."))
+
+(defvar +py-ellipsis+ (make-instance 'py-ellipsis))
 
 ;;; bool -------------------------------------------------------------------
 (defclass py-bool (py-object)
@@ -303,8 +321,8 @@
   ((%value :initarg :value :accessor py-dict-value))
   (:documentation "Python dict."))
 
-(defun make-py-dict ()
-  (make-instance 'py-dict :value (make-hash-table :test #'equal)))
+(defun make-py-dict (&optional ht)
+  (make-instance 'py-dict :value (or ht (make-hash-table :test #'equal))))
 
 ;;; set --------------------------------------------------------------------
 (defclass py-set (py-object)
@@ -345,10 +363,11 @@
    (%env       :initarg :env       :accessor py-function-env       :initform nil)
    (%cl-fn     :initarg :cl-fn     :accessor py-function-cl-fn     :initform nil)
    (%generator :initarg :generator :accessor py-function-generator :initform nil)
-   (%async-p   :initarg :async-p   :accessor py-function-async-p   :initform nil))
+   (%async-p   :initarg :async-p   :accessor py-function-async-p   :initform nil)
+   (%docstring :initarg :docstring :accessor py-function-docstring :initform nil))
   (:documentation "Python function or lambda."))
 
-(defun make-py-function (&key name params body env cl-fn generator async-p)
+(defun make-py-function (&key name params body env cl-fn generator async-p docstring)
   (make-instance 'py-function
                  :name (or name "<lambda>")
                  :params (or params '())
@@ -356,7 +375,8 @@
                  :env env
                  :cl-fn cl-fn
                  :generator generator
-                 :async-p async-p))
+                 :async-p async-p
+                 :docstring docstring))
 
 ;;; method -----------------------------------------------------------------
 (defclass py-super (py-object)
@@ -384,6 +404,20 @@
 
 (defun make-py-method (fn self)
   (make-instance 'py-method :function fn :self self))
+
+;;; staticmethod / classmethod / property wrappers -------------------------
+(defclass py-staticmethod-wrapper (py-object)
+  ((%function :initarg :function :accessor py-staticmethod-function))
+  (:documentation "Python staticmethod descriptor."))
+
+(defclass py-classmethod-wrapper (py-object)
+  ((%function :initarg :function :accessor py-classmethod-function))
+  (:documentation "Python classmethod descriptor."))
+
+(defclass py-property-wrapper (py-object)
+  ((%fget :initarg :fget :accessor py-property-fget :initform nil)
+   (%fset :initarg :fset :accessor py-property-fset :initform nil))
+  (:documentation "Python property descriptor."))
 
 ;;; type -------------------------------------------------------------------
 (defclass py-type (py-object)
@@ -559,6 +593,46 @@
 ;;;; Protocol generic functions
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
+;;; C3 MRO linearization ---------------------------------------------------
+
+(defvar *object-type* nil
+  "Cached reference to the builtin 'object' type, set after builtins are registered.")
+
+(defun %compute-c3-mro (cls)
+  "Compute C3 linearization for CLS. Returns a list of py-type objects."
+  (if (null (py-type-bases cls))
+      ;; Base case: class with no explicit bases
+      (if *object-type*
+          (if (eq cls *object-type*)
+              (list cls)
+              (list cls *object-type*))
+          (list cls))
+      ;; Recursive C3 merge
+      (let* ((parent-mros (mapcar #'%compute-c3-mro (py-type-bases cls)))
+             (to-merge (append parent-mros (list (copy-list (py-type-bases cls))))))
+        (cons cls (%c3-merge to-merge)))))
+
+(defun %c3-merge (seqs)
+  "C3 linearization merge step."
+  (let ((result '()))
+    (loop
+      ;; Remove empty lists
+      (setf seqs (remove-if #'null seqs))
+      (when (null seqs) (return (nreverse result)))
+      ;; Find a candidate: head of some list that doesn't appear in tail of any list
+      (let ((candidate nil))
+        (dolist (seq seqs)
+          (let ((head (first seq)))
+            (unless (some (lambda (s) (member head (rest s) :test #'eq)) seqs)
+              (setf candidate head)
+              (return))))
+        (unless candidate
+          ;; C3 linearization impossible — fall back to DFS
+          (return (nreverse (append result (mapcan #'copy-list seqs)))))
+        ;; Add candidate to result and remove it from all lists
+        (push candidate result)
+        (setf seqs (mapcar (lambda (s) (remove candidate s :test #'eq)) seqs))))))
+
 ;;; Class hierarchy lookup --------------------------------------------------
 
 (defun %lookup-in-class-hierarchy (cls name)
@@ -593,18 +667,16 @@
 ;; py-repr default for py-object is defined in the dunder fallbacks section below
 
 (defmethod py-str-of ((obj py-object))
-  "Default: check for __str__ in class dict, else use __repr__."
-  (let ((cls (py-object-class obj)))
-    (when (typep cls 'py-type)
-      (let ((tdict (py-type-dict cls)))
-        (when tdict
-          (multiple-value-bind (str-fn found) (gethash "__str__" tdict)
-            (when found
-              (return-from py-str-of (py-str-value (py-call str-fn obj)))))))))
+  "Default: check for __str__ in class hierarchy, else use __repr__."
+  (let ((str-fn (%lookup-dunder obj "__str__")))
+    (when str-fn
+      (return-from py-str-of (py-str-value (py-call str-fn obj)))))
   (py-repr obj))
 
 (defmethod py-repr ((obj py-none))   "None")
 (defmethod py-str-of ((obj py-none)) "None")
+(defmethod py-repr ((obj py-ellipsis))   "Ellipsis")
+(defmethod py-str-of ((obj py-ellipsis)) "Ellipsis")
 
 (defmethod py-repr ((obj py-bool))
   (if (py-bool-raw obj) "True" "False"))
@@ -619,6 +691,10 @@
 (defun format-py-float (v)
   "Format a double-float the way Python's repr() does."
   (cond
+    ;; NaN and Inf must come first — they fail on zerop/floor/etc.
+    ((sb-ext:float-nan-p v) "nan")
+    ((and (sb-ext:float-infinity-p v) (> v 0)) "inf")
+    ((sb-ext:float-infinity-p v) "-inf")
     ;; Special cases
     ((zerop v) (if (minusp (float-sign v)) "-0.0" "0.0"))
     ;; Integers that fit: 3.0, -1.0, etc.
@@ -667,13 +743,36 @@
 (defmethod py-str-of ((obj py-float))
   (py-repr obj))
 
+(defun %format-py-float (val &key (for-complex nil))
+  "Format a double-float like Python. FOR-COMPLEX omits .0 when integer-valued."
+  (cond
+    ;; Handle NaN
+    ((sb-ext:float-nan-p val) "nan")
+    ;; Handle Inf
+    ((sb-ext:float-infinity-p val)
+     (if (> val 0) "inf" "-inf"))
+    ((and for-complex (= val (ftruncate val)))
+     ;; Complex parts: integer-valued → no decimal (Python prints 1j not 1.0j)
+     (format nil "~D" (round val)))
+    ((= val (ftruncate val))
+     ;; Regular float: always show .0
+     (format nil "~D.0" (round val)))
+    (t
+     ;; Fractional: trim trailing zeros
+     (let ((s (string-right-trim "0" (format nil "~F" val))))
+       (when (char= (char s (1- (length s))) #\.) (setf s (concatenate 'string s "0")))
+       s))))
+
 (defmethod py-repr ((obj py-complex))
   (let* ((z (py-complex-value obj))
          (r (realpart z))
          (i (imagpart z)))
     (if (zerop r)
-        (format nil "~Gj" i)
-        (format nil "(~G~@Gj)" r i))))
+        (format nil "~Aj" (%format-py-float i :for-complex t))
+        (format nil "(~A~Aj)" (%format-py-float r :for-complex t)
+                (if (>= i 0)
+                    (format nil "+~A" (%format-py-float i :for-complex t))
+                    (%format-py-float i :for-complex t))))))
 (defmethod py-str-of ((obj py-complex)) (py-repr obj))
 
 (defmethod py-repr ((obj py-str))
@@ -737,10 +836,10 @@
 (defmethod py-str-of ((obj py-set)) (py-repr obj))
 
 (defmethod py-repr ((obj py-frozenset))
-  (let ((keys (%hash-table-keys (py-frozenset-value obj))))
-    (if (null keys)
+  (let ((vals (%hash-table-values (py-frozenset-value obj))))
+    (if (null vals)
         "frozenset()"
-        (format nil "frozenset({~{~A~^, ~}})" (mapcar #'py-repr keys)))))
+        (format nil "frozenset({~{~A~^, ~}})" (mapcar #'py-repr vals)))))
 (defmethod py-str-of ((obj py-frozenset)) (py-repr obj))
 
 (defmethod py-repr ((obj py-function))
@@ -812,6 +911,10 @@
 (defmethod py-eq ((a py-none) (b py-none)) t)
 (defmethod py-eq ((a py-bool) (b py-bool))
   (eq (py-bool-raw a) (py-bool-raw b)))
+(defmethod py-eq ((a py-bool) (b py-int))
+  (= (if (py-bool-raw a) 1 0) (py-int-value b)))
+(defmethod py-eq ((a py-int) (b py-bool))
+  (= (py-int-value a) (if (py-bool-raw b) 1 0)))
 (defmethod py-eq ((a py-int) (b py-int))
   (= (py-int-value a) (py-int-value b)))
 (defmethod py-eq ((a py-float) (b py-float))
@@ -822,6 +925,17 @@
   (= (py-float-value a) (py-int-value b)))
 (defmethod py-eq ((a py-complex) (b py-complex))
   (= (py-complex-value a) (py-complex-value b)))
+
+(defmethod py-getattr ((obj py-complex) (name string))
+  (let ((z (py-complex-value obj)))
+    (cond
+      ((string= name "real") (make-py-float (realpart z)))
+      ((string= name "imag") (make-py-float (imagpart z)))
+      ((string= name "conjugate")
+       (make-py-function :name "conjugate"
+         :cl-fn (lambda (&rest args) (declare (ignore args))
+                  (make-py-complex (conjugate z)))))
+      (t (call-next-method)))))
 (defmethod py-eq ((a py-str) (b py-str))
   (string= (py-str-value a) (py-str-value b)))
 (defmethod py-eq ((a py-bytes) (b py-bytes))
@@ -873,6 +987,40 @@
 (defmethod py-gt ((a py-str) (b py-str)) (string> (py-str-value a) (py-str-value b)))
 (defmethod py-ge ((a py-str) (b py-str)) (string>= (py-str-value a) (py-str-value b)))
 
+;; sequence ordering (lexicographic, element-wise) for tuples and lists
+(defun %seq-compare (va vb)
+  "Lexicographic comparison of two sequences of py objects.
+   Returns -1, 0, or 1."
+  (let ((la (length va))
+        (lb (length vb)))
+    (dotimes (i (min la lb))
+      (let ((ai (elt va i))
+            (bi (elt vb i)))
+        (cond
+          ((py-lt ai bi) (return-from %seq-compare -1))
+          ((py-lt bi ai) (return-from %seq-compare 1)))))
+    (cond ((< la lb) -1)
+          ((> la lb) 1)
+          (t 0))))
+
+(defmethod py-lt ((a py-tuple) (b py-tuple))
+  (= (%seq-compare (py-tuple-value a) (py-tuple-value b)) -1))
+(defmethod py-le ((a py-tuple) (b py-tuple))
+  (<= (%seq-compare (py-tuple-value a) (py-tuple-value b)) 0))
+(defmethod py-gt ((a py-tuple) (b py-tuple))
+  (= (%seq-compare (py-tuple-value a) (py-tuple-value b)) 1))
+(defmethod py-ge ((a py-tuple) (b py-tuple))
+  (>= (%seq-compare (py-tuple-value a) (py-tuple-value b)) 0))
+
+(defmethod py-lt ((a py-list) (b py-list))
+  (= (%seq-compare (py-list-value a) (py-list-value b)) -1))
+(defmethod py-le ((a py-list) (b py-list))
+  (<= (%seq-compare (py-list-value a) (py-list-value b)) 0))
+(defmethod py-gt ((a py-list) (b py-list))
+  (= (%seq-compare (py-list-value a) (py-list-value b)) 1))
+(defmethod py-ge ((a py-list) (b py-list))
+  (>= (%seq-compare (py-list-value a) (py-list-value b)) 0))
+
 ;;; arithmetic -------------------------------------------------------------
 
 (defgeneric py-add (a b) (:documentation "Python a + b."))
@@ -887,6 +1035,92 @@
 (defgeneric py-and (a b) (:documentation "Python a & b."))
 (defgeneric py-or  (a b) (:documentation "Python a | b."))
 (defgeneric py-xor (a b) (:documentation "Python a ^ b."))
+
+;;; bool → int coercion for arithmetic
+;;; Python treats bool as a subclass of int. When bools participate in
+;;; arithmetic, they coerce to 0/1.
+(defun %bool-to-int (obj)
+  "Coerce py-bool to py-int (True→1, False→0). Pass through non-bools."
+  (if (typep obj 'py-bool)
+      (make-py-int (if (py-bool-raw obj) 1 0))
+      obj))
+
+;;; Bool arithmetic — coerce to int and dispatch
+(defmethod py-add ((a py-bool) (b py-bool))
+  (py-add (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-add ((a py-bool) (b py-int))
+  (py-add (%bool-to-int a) b))
+(defmethod py-add ((a py-int) (b py-bool))
+  (py-add a (%bool-to-int b)))
+(defmethod py-add ((a py-bool) (b py-float))
+  (py-add (%bool-to-int a) b))
+(defmethod py-add ((a py-float) (b py-bool))
+  (py-add a (%bool-to-int b)))
+(defmethod py-sub ((a py-bool) (b py-bool))
+  (py-sub (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-sub ((a py-bool) (b py-int))
+  (py-sub (%bool-to-int a) b))
+(defmethod py-sub ((a py-int) (b py-bool))
+  (py-sub a (%bool-to-int b)))
+(defmethod py-mul ((a py-bool) (b py-bool))
+  (py-mul (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-mul ((a py-bool) (b py-int))
+  (py-mul (%bool-to-int a) b))
+(defmethod py-mul ((a py-int) (b py-bool))
+  (py-mul a (%bool-to-int b)))
+(defmethod py-mul ((a py-bool) (b py-str))
+  (py-mul (%bool-to-int a) b))
+(defmethod py-truediv ((a py-bool) (b py-bool))
+  (py-truediv (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-truediv ((a py-bool) (b py-int))
+  (py-truediv (%bool-to-int a) b))
+(defmethod py-truediv ((a py-int) (b py-bool))
+  (py-truediv a (%bool-to-int b)))
+(defmethod py-floordiv ((a py-bool) (b py-bool))
+  (py-floordiv (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-floordiv ((a py-bool) (b py-int))
+  (py-floordiv (%bool-to-int a) b))
+(defmethod py-floordiv ((a py-int) (b py-bool))
+  (py-floordiv a (%bool-to-int b)))
+(defmethod py-mod ((a py-bool) (b py-bool))
+  (py-mod (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-mod ((a py-bool) (b py-int))
+  (py-mod (%bool-to-int a) b))
+(defmethod py-mod ((a py-int) (b py-bool))
+  (py-mod a (%bool-to-int b)))
+(defmethod py-pow ((a py-bool) (b py-bool))
+  (py-pow (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-pow ((a py-bool) (b py-int))
+  (py-pow (%bool-to-int a) b))
+(defmethod py-pow ((a py-int) (b py-bool))
+  (py-pow a (%bool-to-int b)))
+;; Bool bitwise — coerce and dispatch
+(defmethod py-and ((a py-bool) (b py-bool))
+  (py-and (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-and ((a py-bool) (b py-int))
+  (py-and (%bool-to-int a) b))
+(defmethod py-and ((a py-int) (b py-bool))
+  (py-and a (%bool-to-int b)))
+(defmethod py-or ((a py-bool) (b py-bool))
+  (py-or (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-or ((a py-bool) (b py-int))
+  (py-or (%bool-to-int a) b))
+(defmethod py-or ((a py-int) (b py-bool))
+  (py-or a (%bool-to-int b)))
+(defmethod py-xor ((a py-bool) (b py-bool))
+  (py-xor (%bool-to-int a) (%bool-to-int b)))
+(defmethod py-xor ((a py-bool) (b py-int))
+  (py-xor (%bool-to-int a) b))
+(defmethod py-xor ((a py-int) (b py-bool))
+  (py-xor a (%bool-to-int b)))
+(defmethod py-lshift ((a py-bool) b)
+  (py-lshift (%bool-to-int a) b))
+(defmethod py-lshift (a (b py-bool))
+  (py-lshift a (%bool-to-int b)))
+(defmethod py-rshift ((a py-bool) b)
+  (py-rshift (%bool-to-int a) b))
+(defmethod py-rshift (a (b py-bool))
+  (py-rshift a (%bool-to-int b)))
 
 ;; int × int
 (defmethod py-add ((a py-int) (b py-int))
@@ -909,7 +1143,11 @@
     (py-raise "ZeroDivisionError" "integer division or modulo by zero"))
   (make-py-int (mod (py-int-value a) (py-int-value b))))
 (defmethod py-pow ((a py-int) (b py-int))
-  (make-py-int (expt (py-int-value a) (py-int-value b))))
+  (let ((av (py-int-value a)) (bv (py-int-value b)))
+    (if (< bv 0)
+        ;; Negative exponent → float result (Python semantics)
+        (make-py-float (expt (float av 1.0d0) bv))
+        (make-py-int (expt av bv)))))
 (defmethod py-lshift ((a py-int) (b py-int))
   (make-py-int (ash (py-int-value a) (py-int-value b))))
 (defmethod py-rshift ((a py-int) (b py-int))
@@ -954,6 +1192,118 @@
 (%coerce-float-op py-mul   py-int-value py-float-value *)
 (%coerce-float-op py-truediv py-int-value py-float-value /)
 
+;; float // int and float % int
+(defmethod py-floordiv ((a py-float) (b py-int))
+  (let ((bv (float (py-int-value b) 1.0d0)))
+    (when (zerop bv) (py-raise "ZeroDivisionError" "float floor division by zero"))
+    (make-py-float (ffloor (py-float-value a) bv))))
+(defmethod py-floordiv ((a py-int) (b py-float))
+  (when (zerop (py-float-value b)) (py-raise "ZeroDivisionError" "float floor division by zero"))
+  (make-py-float (ffloor (float (py-int-value a) 1.0d0) (py-float-value b))))
+(defmethod py-mod ((a py-float) (b py-int))
+  (let ((bv (float (py-int-value b) 1.0d0)))
+    (when (zerop bv) (py-raise "ZeroDivisionError" "float modulo"))
+    (make-py-float (mod (py-float-value a) bv))))
+(defmethod py-mod ((a py-int) (b py-float))
+  (when (zerop (py-float-value b)) (py-raise "ZeroDivisionError" "float modulo"))
+  (make-py-float (mod (float (py-int-value a) 1.0d0) (py-float-value b))))
+;;; Complex arithmetic ─────────────────────────────────────────────────────
+
+(defun %to-complex (obj)
+  "Coerce a numeric py-object to a CL complex double-float."
+  (etypecase obj
+    (py-complex (py-complex-value obj))
+    (py-float   (complex (py-float-value obj) 0.0d0))
+    (py-int     (complex (float (py-int-value obj) 1.0d0) 0.0d0))
+    (py-bool    (complex (float (if (py-bool-raw obj) 1 0) 1.0d0) 0.0d0))))
+
+(defmacro %complex-binop (method cl-op)
+  `(progn
+     ;; complex × complex
+     (defmethod ,method ((a py-complex) (b py-complex))
+       (make-py-complex (,cl-op (py-complex-value a) (py-complex-value b))))
+     ;; complex × int
+     (defmethod ,method ((a py-complex) (b py-int))
+       (make-py-complex (,cl-op (py-complex-value a) (%to-complex b))))
+     ;; int × complex
+     (defmethod ,method ((a py-int) (b py-complex))
+       (make-py-complex (,cl-op (%to-complex a) (py-complex-value b))))
+     ;; complex × float
+     (defmethod ,method ((a py-complex) (b py-float))
+       (make-py-complex (,cl-op (py-complex-value a) (%to-complex b))))
+     ;; float × complex
+     (defmethod ,method ((a py-float) (b py-complex))
+       (make-py-complex (,cl-op (%to-complex a) (py-complex-value b))))))
+
+(%complex-binop py-add +)
+(%complex-binop py-sub -)
+(%complex-binop py-mul *)
+(%complex-binop py-truediv /)
+
+(defmethod py-pow ((a py-complex) (b py-complex))
+  (make-py-complex (expt (py-complex-value a) (py-complex-value b))))
+(defmethod py-pow ((a py-complex) (b py-int))
+  (make-py-complex (expt (py-complex-value a) (%to-complex b))))
+(defmethod py-pow ((a py-int) (b py-complex))
+  (make-py-complex (expt (%to-complex a) (py-complex-value b))))
+(defmethod py-pow ((a py-complex) (b py-float))
+  (make-py-complex (expt (py-complex-value a) (%to-complex b))))
+(defmethod py-pow ((a py-float) (b py-complex))
+  (make-py-complex (expt (%to-complex a) (py-complex-value b))))
+
+;;; String % formatting (printf-style)
+(defmethod py-mod ((a py-str) (b py-tuple))
+  "Python string % formatting with tuple of args."
+  (make-py-str (%py-string-format (py-str-value a) (coerce (py-tuple-value b) 'list))))
+
+(defmethod py-mod ((a py-str) b)
+  "Python string % formatting with single arg."
+  (make-py-str (%py-string-format (py-str-value a) (list b))))
+
+(defun %py-string-format (fmt args)
+  "Implement Python %-style string formatting."
+  (let ((result (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t))
+        (i 0)
+        (arg-idx 0))
+    (loop while (< i (length fmt)) do
+      (let ((ch (char fmt i)))
+        (if (and (char= ch #\%) (< (1+ i) (length fmt)))
+            (progn
+              (incf i)
+              (let ((spec (char fmt i)))
+                (case spec
+                  (#\s (vector-push-extend-string result (py-str-of (nth arg-idx args)))
+                       (incf arg-idx))
+                  (#\d (vector-push-extend-string result
+                         (write-to-string (py-int-value (nth arg-idx args))))
+                       (incf arg-idx))
+                  (#\f (vector-push-extend-string result
+                         (format nil "~F" (if (typep (nth arg-idx args) 'py-float)
+                                              (py-float-value (nth arg-idx args))
+                                              (float (py-int-value (nth arg-idx args)) 1.0d0))))
+                       (incf arg-idx))
+                  (#\r (vector-push-extend-string result (py-repr (nth arg-idx args)))
+                       (incf arg-idx))
+                  (#\x (vector-push-extend-string result
+                         (format nil "~x" (py-int-value (nth arg-idx args))))
+                       (incf arg-idx))
+                  (#\% (vector-push-extend #\% result))
+                  (otherwise (vector-push-extend #\% result)
+                             (vector-push-extend spec result)))
+                (incf i)))
+            (progn (vector-push-extend ch result) (incf i)))))
+    (coerce result 'string)))
+
+(defun vector-push-extend-string (vec str)
+  "Push all characters of STR onto adjustable VEC."
+  (loop for ch across str do (vector-push-extend ch vec)))
+
+;; int ** float → float
+(defmethod py-pow ((a py-int) (b py-float))
+  (make-py-float (expt (float (py-int-value a) 1.0d0) (py-float-value b))))
+(defmethod py-pow ((a py-float) (b py-int))
+  (make-py-float (expt (py-float-value a) (float (py-int-value b) 1.0d0))))
+
 ;; str concatenation / repetition
 (defmethod py-add ((a py-str) (b py-str))
   (make-py-str (concatenate 'string (py-str-value a) (py-str-value b))))
@@ -988,6 +1338,49 @@
                                (coerce (py-tuple-value a) 'list)
                                (coerce (py-tuple-value b) 'list))))
 
+;; set operations: & (intersection), | (union), ^ (symmetric difference), - (difference)
+(defmethod py-and ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v)
+               (when (nth-value 1 (gethash k hb))
+                 (setf (gethash k result) v)))
+             ha)
+    (make-instance 'py-set :value result)))
+
+(defmethod py-or ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v) (setf (gethash k result) v)) ha)
+    (maphash (lambda (k v) (setf (gethash k result) v)) hb)
+    (make-instance 'py-set :value result)))
+
+(defmethod py-xor ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k hb))
+                 (setf (gethash k result) v)))
+             ha)
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k ha))
+                 (setf (gethash k result) v)))
+             hb)
+    (make-instance 'py-set :value result)))
+
+(defmethod py-sub ((a py-set) (b py-set))
+  (let ((ha (py-set-value a))
+        (hb (py-set-value b))
+        (result (make-hash-table :test #'equal)))
+    (maphash (lambda (k v)
+               (unless (nth-value 1 (gethash k hb))
+                 (setf (gethash k result) v)))
+             ha)
+    (make-instance 'py-set :value result)))
+
 ;;; unary ------------------------------------------------------------------
 
 (defgeneric py-neg (a) (:documentation "Python -a."))
@@ -995,6 +1388,10 @@
 (defgeneric py-abs (a) (:documentation "Python abs(a)."))
 (defgeneric py-invert (a) (:documentation "Python ~a."))
 
+(defmethod py-neg ((a py-bool))  (py-neg (%bool-to-int a)))
+(defmethod py-pos ((a py-bool))  (py-pos (%bool-to-int a)))
+(defmethod py-abs ((a py-bool))  (py-abs (%bool-to-int a)))
+(defmethod py-invert ((a py-bool)) (py-invert (%bool-to-int a)))
 (defmethod py-neg ((a py-int))   (make-py-int   (- (py-int-value a))))
 (defmethod py-pos ((a py-int))   (make-py-int   (py-int-value a)))
 (defmethod py-abs ((a py-int))   (make-py-int   (abs (py-int-value a))))
@@ -1007,6 +1404,18 @@
   (let ((fn (%lookup-dunder a "__neg__")))
     (if fn (py-call fn a)
         (py-raise "TypeError" "bad operand type for unary -"))))
+(defmethod py-pos ((a py-object))
+  (let ((fn (%lookup-dunder a "__pos__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for unary +"))))
+(defmethod py-abs ((a py-object))
+  (let ((fn (%lookup-dunder a "__abs__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for abs()"))))
+(defmethod py-invert ((a py-object))
+  (let ((fn (%lookup-dunder a "__invert__")))
+    (if fn (py-call fn a)
+        (py-raise "TypeError" "bad operand type for unary ~"))))
 (defmethod py-abs ((a py-complex)) (make-py-float (abs (py-complex-value a))))
 
 ;;; attribute access -------------------------------------------------------
@@ -1019,6 +1428,22 @@
 
 (defgeneric py-delattr (obj name)
   (:documentation "Python delattr(obj, name)."))
+
+;;; ─── Property descriptor methods ────────────────────────────────────────────
+
+(defmethod py-getattr ((obj py-property-wrapper) (name string))
+  (cond
+    ((string= name "setter")
+     ;; Return a callable that creates a new property with the same fget and the given fset
+     (make-py-function
+      :name "property.setter"
+      :cl-fn (lambda (&rest args)
+               (make-instance 'py-property-wrapper
+                              :fget (py-property-fget obj)
+                              :fset (first args)))))
+    ((string= name "fget") (or (py-property-fget obj) +py-none+))
+    ((string= name "fset") (or (py-property-fset obj) +py-none+))
+    (t (call-next-method))))
 
 ;;; ─── String methods ─────────────────────────────────────────────────────────
 
@@ -1177,6 +1602,53 @@
                            (vector-push-extend (char s i) result)
                            (incf i))))
                    (make-py-str (coerce result 'string))))))
+        ((string= name "capitalize")
+         (wrap (lambda ()
+                 (if (zerop (length s))
+                     (make-py-str "")
+                     (make-py-str (concatenate 'string
+                                               (string (char-upcase (char s 0)))
+                                               (string-downcase (subseq s 1))))))))
+        ((string= name "title")
+         (wrap (lambda ()
+                 (let ((result (make-array (length s) :element-type 'character))
+                       (cap-next t))
+                   (loop for i below (length s)
+                         for c = (char s i) do
+                         (cond
+                           ((not (alphanumericp c))
+                            (setf (aref result i) c)
+                            (setf cap-next t))
+                           (cap-next
+                            (setf (aref result i) (char-upcase c))
+                            (setf cap-next nil))
+                           (t
+                            (setf (aref result i) (char-downcase c)))))
+                   (make-py-str (coerce result 'string))))))
+        ((string= name "isdigit")
+         (wrap (lambda ()
+                 (py-bool-from-cl (and (plusp (length s))
+                                       (every #'digit-char-p s))))))
+        ((string= name "isalpha")
+         (wrap (lambda ()
+                 (py-bool-from-cl (and (plusp (length s))
+                                       (every #'alpha-char-p s))))))
+        ((string= name "zfill")
+         (wrap (lambda (width-obj)
+                 (let* ((width (py-int-value width-obj))
+                        (len (length s))
+                        (has-sign (and (plusp len)
+                                       (or (char= (char s 0) #\+)
+                                           (char= (char s 0) #\-)))))
+                   (if (<= width len)
+                       (make-py-str s)
+                       (let ((pad (make-string (- width len) :initial-element #\0)))
+                         (if has-sign
+                             (make-py-str (concatenate 'string
+                                                       (string (char s 0))
+                                                       pad
+                                                       (subseq s 1)))
+                             (make-py-str (concatenate 'string pad s)))))))))
         (t (call-next-method))))))
 
 ;;; ─── List methods ──────────────────────────────────────────────────────────
@@ -1258,6 +1730,13 @@
         ((string= name "copy")
          (wrap (lambda ()
                  (make-py-list (coerce vec 'list)))))
+        ((string= name "__len__")
+         (wrap (lambda () (make-py-int (length vec)))))
+        ((string= name "__contains__")
+         (wrap (lambda (item)
+                 (py-bool-from-cl (find-if (lambda (x) (py-eq x item)) vec)))))
+        ((string= name "__class__")
+         (make-py-type :name "list"))
         (t (call-next-method))))))
 
 ;;; ─── Dict methods ──────────────────────────────────────────────────────────
@@ -1348,17 +1827,29 @@
   ;; Built-in attributes for function objects
   (cond
     ((string= name "__name__") (make-py-str (or (py-function-name obj) "<lambda>")))
-    ((string= name "__doc__")  +py-none+)
+    ((string= name "__doc__")  (let ((doc (py-function-docstring obj)))
+                                (if doc (make-py-str doc) +py-none+)))
+    ((string= name "__annotations__") (make-py-dict))  ; stub — annotations not tracked yet
     (t (call-next-method))))
 
 (defmethod py-getattr ((obj py-type) (name string))
   ;; Built-in attributes for type objects
   (cond
     ((string= name "__name__") (make-py-str (py-type-name obj)))
+    ((string= name "__mro__")
+     ;; Compute C3-linearized MRO
+     (make-py-tuple (%compute-c3-mro obj)))
     (t
      ;; Check the type's own dict and parent classes
      (multiple-value-bind (val found) (%lookup-in-class-hierarchy obj name)
-       (when found (return-from py-getattr val)))
+       (when found
+         (cond
+           ((typep val 'py-staticmethod-wrapper)
+            (return-from py-getattr (py-staticmethod-function val)))
+           ((typep val 'py-classmethod-wrapper)
+            (return-from py-getattr
+              (make-instance 'py-method :function (py-classmethod-function val) :self obj)))
+           (t (return-from py-getattr val)))))
      (call-next-method))))
 
 (defmethod py-setattr ((obj py-type) (name string) value)
@@ -1369,27 +1860,86 @@
       (setf (py-type-dict obj) tdict))
     (setf (gethash name tdict) value)))
 
+(defun %is-data-descriptor-p (val)
+  "Check if VAL is a data descriptor (has __set__ or __delete__)."
+  (and (typep val 'py-object)
+       (let ((cls (py-object-class val)))
+         (when (typep cls 'py-type)
+           (or (gethash "__set__" (py-type-dict cls))
+               (gethash "__delete__" (py-type-dict cls)))))))
+
+(defun %invoke-descriptor-get (desc obj cls)
+  "Invoke __get__ on a descriptor if it has one, else return desc."
+  (when (typep desc 'py-object)
+    (let ((get-fn (%lookup-dunder desc "__get__")))
+      (when get-fn
+        (return-from %invoke-descriptor-get
+          (py-call get-fn desc obj (or cls +py-none+))))))
+  desc)
+
 (defmethod py-getattr ((obj py-object) (name string))
-  ;; 1. Check instance dict
+  ;; 1. Check class dict for data descriptors (priority over instance dict)
+  (let ((cls (py-object-class obj)))
+    (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
+      (when found
+        ;; Data descriptor takes priority
+        (when (%is-data-descriptor-p val)
+          (return-from py-getattr (%invoke-descriptor-get val obj cls))))))
+  ;; 2. Check instance dict
   (let ((d (py-object-dict obj)))
     (when (hash-table-p d)
       (multiple-value-bind (val found) (gethash name d)
         (when found (return-from py-getattr val)))))
-  ;; 2. Check class dict and parent classes (MRO)
+  ;; 3. Check class dict for non-data descriptors, methods, etc.
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
       (when found
-        ;; If it's a function, return a bound method
-        (if (typep val 'py-function)
-            (return-from py-getattr
-              (make-instance 'py-method :function val :self obj))
-            (return-from py-getattr val)))))
+        (cond
+          ;; @staticmethod — return unwrapped function (no self binding)
+          ((typep val 'py-staticmethod-wrapper)
+           (return-from py-getattr (py-staticmethod-function val)))
+          ;; @classmethod — bind the class, not the instance
+          ((typep val 'py-classmethod-wrapper)
+           (return-from py-getattr
+             (make-instance 'py-method :function (py-classmethod-function val) :self cls)))
+          ;; @property — call the getter
+          ((typep val 'py-property-wrapper)
+           (let ((fget (py-property-fget val)))
+             (if fget
+                 (return-from py-getattr (py-call fget obj))
+                 (py-raise "AttributeError" "unreadable attribute"))))
+          ;; Non-data descriptor with __get__
+          ((and (typep val 'py-object) (%lookup-dunder val "__get__"))
+           (return-from py-getattr (%invoke-descriptor-get val obj cls)))
+          ;; Regular function — return a bound method
+          ((typep val 'py-function)
+           (return-from py-getattr
+             (make-instance 'py-method :function val :self obj)))
+          ;; Anything else (class attributes, etc.)
+          (t (return-from py-getattr val))))))
   (py-raise "AttributeError" "'~A' object has no attribute '~A'"
             (let ((cls (py-object-class obj)))
               (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))
             name))
 
 (defmethod py-setattr ((obj py-object) (name string) value)
+  ;; Check for @property setter or data descriptor __set__ in class hierarchy
+  (let ((cls (py-object-class obj)))
+    (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
+      (when found
+        (cond
+          ((typep val 'py-property-wrapper)
+           (let ((fset (py-property-fset val)))
+             (if fset
+                 (progn (py-call fset obj value) (return-from py-setattr +py-none+))
+                 (py-raise "AttributeError" "can't set attribute"))))
+          ;; Data descriptor with __set__
+          ((and (typep val 'py-object)
+                (let ((set-fn (%lookup-dunder val "__set__")))
+                  (when set-fn
+                    (py-call set-fn val obj value)
+                    t)))
+           (return-from py-setattr +py-none+))))))
   (unless (hash-table-p (py-object-dict obj))
     (setf (py-object-dict obj) (make-hash-table :test #'equal)))
   (setf (gethash name (py-object-dict obj)) value))
@@ -1503,6 +2053,45 @@
          (len (length vec)))
     (make-py-list (slice-collect vec len key (lambda (i) (aref vec i))))))
 
+(defmethod py-setitem ((obj py-list) (key py-slice) value)
+  "Slice assignment: x[start:stop] = iterable.  Only step=1 supported for now."
+  (let* ((vec (py-list-value obj))
+         (len (length vec)))
+    (multiple-value-bind (start stop step) (compute-slice-indices key len)
+      (declare (ignore step))
+      ;; Collect new values from the iterable
+      (let ((new-items
+              (cond
+                ((typep value 'py-list)
+                 (coerce (py-list-value value) 'list))
+                ((typep value 'py-tuple)
+                 (coerce (py-tuple-value value) 'list))
+                (t (list value)))))
+        ;; Simple case: replace [start..stop) with new-items
+        (let* ((before (loop for i from 0 below start collect (aref vec i)))
+               (after  (loop for i from stop below len collect (aref vec i)))
+               (all    (append before new-items after))
+               (new-vec (make-array (length all)
+                                    :fill-pointer (length all)
+                                    :adjustable t
+                                    :initial-contents all)))
+          (setf (slot-value obj '%value) new-vec))))))
+
+(defmethod py-delitem ((obj py-list) (key py-slice))
+  "Delete a slice from a list: del x[start:stop]."
+  (let* ((vec (py-list-value obj))
+         (len (length vec)))
+    (multiple-value-bind (start stop step) (compute-slice-indices key len)
+      (declare (ignore step))
+      (let* ((before (loop for i from 0 below start collect (aref vec i)))
+             (after  (loop for i from stop below len collect (aref vec i)))
+             (all    (append before after))
+             (new-vec (make-array (length all)
+                                  :fill-pointer (length all)
+                                  :adjustable t
+                                  :initial-contents all)))
+        (setf (slot-value obj '%value) new-vec)))))
+
 (defmethod py-getitem ((obj py-tuple) (key py-int))
   (let* ((vec (py-tuple-value obj))
          (len (length vec))
@@ -1555,6 +2144,12 @@
   (unless (remhash (dict-hash-key key) (py-dict-value obj))
     (py-raise "KeyError" "~A" (py-repr key))))
 
+(defmethod py-delitem ((obj py-object) key)
+  (let ((fn (%lookup-dunder obj "__delitem__")))
+    (if fn (py-call fn obj key)
+        (py-raise "TypeError" "'~A' object doesn't support item deletion"
+                  (class-name (class-of obj))))))
+
 ;;; __len__ ----------------------------------------------------------------
 
 (defgeneric py-len (obj) (:documentation "Python len(obj) — returns a CL integer."))
@@ -1584,6 +2179,23 @@
 
 (defmethod py-next ((obj py-generator))
   (py-generator-send obj :next-signal))
+
+(defmethod py-getattr ((obj py-generator) (name string))
+  (cond
+    ((string= name "send")
+     (make-py-function :name "send"
+                       :cl-fn (lambda (value)
+                                 (py-generator-send obj value))))
+    ((string= name "close")
+     (make-py-function :name "close"
+                       :cl-fn (lambda ()
+                                 (setf (py-generator-finished obj) t)
+                                 +py-none+)))
+    ((string= name "__next__")
+     (make-py-function :name "__next__"
+                       :cl-fn (lambda ()
+                                 (py-next obj))))
+    (t (call-next-method))))
 
 (defmethod py-iter ((obj py-list))
   (let ((vec (py-list-value obj))
@@ -1639,21 +2251,21 @@
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-set))
-  (let ((keys (%hash-table-keys (py-set-value obj)))
+  (let ((vals (%hash-table-values (py-set-value obj)))
         (i 0))
     (make-py-iterator
      (lambda ()
-       (if (< i (length keys))
-           (prog1 (nth i keys) (incf i))
+       (if (< i (length vals))
+           (prog1 (nth i vals) (incf i))
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-frozenset))
-  (let ((keys (%hash-table-keys (py-frozenset-value obj)))
+  (let ((vals (%hash-table-values (py-frozenset-value obj)))
         (i 0))
     (make-py-iterator
      (lambda ()
-       (if (< i (length keys))
-           (prog1 (nth i keys) (incf i))
+       (if (< i (length vals))
+           (prog1 (nth i vals) (incf i))
            (error 'stop-iteration))))))
 
 (defmethod py-iter ((obj py-range))
@@ -1684,15 +2296,58 @@
   (apply #'py-call (py-method-function obj) (py-method-self obj) args))
 
 (defmethod py-call ((cls py-type) &rest args)
-  "Instantiate a class: create an instance, then call __init__ if defined."
-  (let* ((instance (make-instance 'py-object
-                                  :py-class cls
-                                  :py-dict (make-hash-table :test #'equal)))
-         (init-fn (let ((tdict (py-type-dict cls)))
-                    (when tdict (gethash "__init__" tdict)))))
-    (when init-fn
-      (apply #'py-call init-fn instance args))
-    instance))
+  "Instantiate a class: create an instance, then call __init__ if defined.
+   If the class is in the exception hierarchy, create a py-exception-object.
+   If the class is 'type', delegate to the type() builtin logic.
+   Uses MRO lookup to find inherited __init__."
+  (let ((name (py-type-name cls)))
+    (cond
+     ;; type(obj) or type(name, bases, dict)
+     ((string= name "type")
+      (cond
+        ((= (length args) 1)
+         ;; type(obj) — return the type
+         (let* ((obj (first args))
+                (obj-cls (py-object-class obj)))
+           (cond
+             ((typep obj-cls 'py-type) obj-cls)
+             ((typep obj 'py-type) cls)  ;; type(SomeClass) → type
+             ((and (typep obj 'py-function)
+                   (member (py-function-name obj)
+                           '("int" "str" "float" "bool" "list" "tuple" "dict"
+                             "set" "frozenset" "bytes" "type" "object" "complex"
+                             "range" "enumerate" "zip" "map" "filter" "reversed"
+                             "super" "property" "staticmethod" "classmethod")
+                           :test #'string=))
+              cls)
+             (t (make-py-type :name (py-type-of obj))))))
+        ((= (length args) 3)
+         ;; type(name, bases, dict)
+         (let* ((tname (py-str-value (first args)))
+                (bases (coerce (py-tuple-value (second args)) 'list))
+                (tdict (make-hash-table :test #'equal)))
+           (maphash (lambda (k v) (setf (gethash k tdict) v))
+                    (py-dict-value (third args)))
+           (make-py-type :name tname :bases bases :tdict tdict)))
+        (t (py-raise "TypeError" "type() takes 1 or 3 arguments"))))
+     ;; Exception class — create py-exception-object directly
+     ((gethash name *exception-hierarchy*)
+      (let ((exc-obj (make-py-exception-object name args)))
+        (multiple-value-bind (init-fn found)
+            (%lookup-in-class-hierarchy cls "__init__")
+          (when found
+            (apply #'py-call init-fn exc-obj args)))
+        exc-obj))
+     ;; Normal class
+     (t
+      (let ((instance (make-instance 'py-object
+                                     :py-class cls
+                                     :py-dict (make-hash-table :test #'equal))))
+        (multiple-value-bind (init-fn found)
+            (%lookup-in-class-hierarchy cls "__init__")
+          (when found
+            (apply #'py-call init-fn instance args)))
+        instance)))))
 
 ;;; __contains__ -----------------------------------------------------------
 
@@ -1787,16 +2442,39 @@
 (defmethod py-add ((a py-object) b)
   (let ((fn (%lookup-dunder a "__add__")))
     (if fn (py-call fn a b)
+        ;; Try reflected
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__radd__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for +"))))))
+
+;; Reflected: when left operand is a built-in type and right is py-object with __radd__
+(defmethod py-add (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__radd__")))
+    (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for +"))))
 
 (defmethod py-sub ((a py-object) b)
   (let ((fn (%lookup-dunder a "__sub__")))
     (if fn (py-call fn a b)
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__rsub__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for -"))))))
+
+(defmethod py-sub (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__rsub__")))
+    (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for -"))))
 
 (defmethod py-mul ((a py-object) b)
   (let ((fn (%lookup-dunder a "__mul__")))
     (if fn (py-call fn a b)
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__rmul__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for *"))))))
+
+(defmethod py-mul (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__rmul__")))
+    (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for *"))))
 
 (defmethod py-eq ((a py-object) (b py-object))
@@ -1806,12 +2484,46 @@
           (py-bool-val result))
         (eq a b))))
 
+(defmethod py-ne ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__ne__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        ;; Default: negate __eq__
+        (not (py-eq a b)))))
+
 (defmethod py-lt ((a py-object) (b py-object))
   (let ((fn (%lookup-dunder a "__lt__")))
     (if fn
         (let ((result (py-call fn a b)))
           (py-bool-val result))
         (py-raise "TypeError" "'<' not supported"))))
+
+(defmethod py-le ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__le__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        (py-raise "TypeError" "'<=' not supported"))))
+
+(defmethod py-gt ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__gt__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        (py-raise "TypeError" "'>' not supported"))))
+
+(defmethod py-ge ((a py-object) (b py-object))
+  (let ((fn (%lookup-dunder a "__ge__")))
+    (if fn
+        (py-bool-val (py-call fn a b))
+        (py-raise "TypeError" "'>=' not supported"))))
+
+(defmethod py-hash ((obj py-object))
+  (let ((fn (%lookup-dunder obj "__hash__")))
+    (if fn
+        (let ((result (py-call fn obj)))
+          (if (typep result 'py-int)
+              (py-int-value result)
+              (sxhash obj)))
+        (sxhash obj))))
 
 (defmethod py-bool-val ((obj py-object))
   (let ((fn (%lookup-dunder obj "__bool__")))
@@ -1824,6 +2536,19 @@
               (let ((result (py-call len-fn obj)))
                 (not (and (typep result 'py-int) (zerop (py-int-value result)))))
               t)))))
+
+;; Type subscript for generic aliases: list[int], dict[str, int], etc.
+;; Returns a string-based stub — enough for PEP 695 type aliases.
+(defmethod py-getitem ((obj py-type) key)
+  (let* ((type-name (py-type-name obj))
+         (key-repr (py-repr key)))
+    (make-py-str (format nil "~A[~A]" type-name key-repr))))
+
+(defmethod py-getitem ((obj py-function) key)
+  ;; Builtin functions used as type constructors (list, dict, etc.)
+  (let* ((fn-name (py-function-name obj))
+         (key-repr (py-repr key)))
+    (make-py-str (format nil "~A[~A]" fn-name key-repr))))
 
 (defmethod py-getitem ((obj py-object) key)
   (let ((fn (%lookup-dunder obj "__getitem__")))
@@ -1889,7 +2614,8 @@
     (make-instance 'py-exception-object
                    :class-name class-name
                    :args args
-                   :message msg)))
+                   :message msg
+                   :py-dict (make-hash-table :test #'equal))))
 
 (defmethod py-repr ((obj py-exception-object))
   (let ((msg (py-exception-message obj)))

@@ -309,8 +309,8 @@
        (let* ((*read-default-float-format* 'double-float)
               (base (subseq clean 0 (1- (length clean)))))
          (if (string= base "")
-             (complex 0 1.0d0)
-             (complex 0 (read-from-string base)))))
+             (complex 0.0d0 1.0d0)
+             (complex 0.0d0 (coerce (read-from-string base) 'double-float)))))
       ;; Hex
       ((and (>= (length clean) 2) (string= (subseq clean 0 2) "0x"))
        (parse-integer (subseq clean 2) :radix 16))
@@ -323,7 +323,9 @@
       ;; Float (contains . or e)
       ((or (find #\. clean) (find #\e clean))
        (let ((*read-default-float-format* 'double-float))
-         (read-from-string clean)))
+         ;; CL reads "5." as integer; ensure trailing-dot produces float
+         (let ((val (read-from-string clean)))
+           (if (integerp val) (coerce val 'double-float) val))))
       ;; Integer
       (t
        (parse-integer clean)))))
@@ -433,24 +435,84 @@
       (flush-text))
     (nreverse parts)))
 
+(defun %split-fstring-expr-parts (source)
+  "Split f-string expression into (expr-src conversion format-spec).
+   Returns (values expr-string conversion-int-or-nil format-spec-string-or-nil)."
+  (let ((len (length source))
+        (i 0)
+        (depth 0))
+    (loop while (< i len) do
+      (let ((ch (char source i)))
+        (case ch
+          ((#\( #\[ #\{) (incf depth) (incf i))
+          ((#\) #\] #\}) (decf depth) (incf i))
+          ((#\' #\")
+           (let ((quote ch))
+             (incf i)
+             (loop while (and (< i len) (not (char= (char source i) quote))) do
+               (when (char= (char source i) #\\) (incf i))
+               (incf i))
+             (when (< i len) (incf i))))
+          (#\!
+           (when (and (zerop depth)
+                      (< (1+ i) len)
+                      (member (char source (1+ i)) '(#\s #\r #\a)))
+             (let ((next-after (+ i 2)))
+               (when (or (>= next-after len)
+                         (char= (char source next-after) #\:))
+                 (let* ((expr-src (subseq source 0 i))
+                        (conv-int (char-code (char source (1+ i))))
+                        (fmt-spec (when (and (< next-after len)
+                                             (char= (char source next-after) #\:))
+                                    (subseq source (1+ next-after)))))
+                   (return-from %split-fstring-expr-parts
+                     (values expr-src conv-int fmt-spec))))))
+           (incf i))
+          (#\:
+           (when (zerop depth)
+             (return-from %split-fstring-expr-parts
+               (values (subseq source 0 i) nil (subseq source (1+ i)))))
+           (incf i))
+          (t (incf i)))))
+    (values source nil nil)))
+
 (defun %parse-fstring-expr (source line col)
   "Parse an f-string expression source into a formatted-value-node."
   (handler-case
-      (let* ((tokens (clython.lexer:tokenize source))
-             (ps (make-parser-state tokens))
-             (expr (parse-expression-internal ps)))
-        (if (failp expr)
-            ;; Fallback: treat as literal
-            (make-instance 'clython.ast:constant-node
-                           :value (format nil "'~A'" source)
-                           :line line :col col)
-            (make-instance 'clython.ast:formatted-value-node
-                           :value expr
-                           :line line :col col)))
+      (multiple-value-bind (expr-src conversion fmt-spec)
+          (%split-fstring-expr-parts source)
+        (let* ((tokens (clython.lexer:tokenize expr-src))
+               (ps (make-parser-state tokens))
+               (expr (parse-expression-internal ps))
+               (fmt-spec-node
+                 (when fmt-spec
+                   (make-instance 'clython.ast:joined-str-node
+                                  :values (list (make-instance 'clython.ast:constant-node
+                                                               :value (format nil "'~A'" fmt-spec)
+                                                               :line line :col col))
+                                  :line line :col col))))
+          (if (failp expr)
+              (make-instance 'clython.ast:constant-node
+                             :value (format nil "'~A'" source)
+                             :line line :col col)
+              (make-instance 'clython.ast:formatted-value-node
+                             :value expr
+                             :conversion conversion
+                             :format-spec fmt-spec-node
+                             :line line :col col))))
     (error ()
       (make-instance 'clython.ast:constant-node
                      :value (format nil "'~A'" source)
                      :line line :col col))))
+
+(defun %string-token-is-bytes (raw)
+  "Return T if the raw token string is a bytes literal (b prefix)."
+  (and (stringp raw)
+       (> (length raw) 0)
+       (let ((i 0))
+         (when (find (char raw i) "rR") (incf i))
+         (and (< i (length raw))
+              (find (char raw i) "bB")))))
 
 (defrule parse-strings
   (let ((first (parse-string-literal ps)))
@@ -464,13 +526,21 @@
               (push (clython.ast:constant-node-value next) rest-parts)))
           (if (null rest-parts)
               first
-              ;; Store all parts as a list so eval can unquote each individually
-              (make-node 'clython.ast:constant-node
-                         :value (cons :concat-strings
-                                      (cons (clython.ast:constant-node-value first)
-                                            (nreverse rest-parts)))
-                         :line (clython.ast:node-line first)
-                         :col (clython.ast:node-col first)))))))
+              ;; Check for mixed string/bytes concatenation
+              (let* ((all-parts (cons (clython.ast:constant-node-value first)
+                                      (nreverse rest-parts)))
+                     (first-is-bytes (%string-token-is-bytes (car all-parts)))
+                     (mixed (find-if (lambda (p)
+                                       (not (eq first-is-bytes
+                                                (%string-token-is-bytes p))))
+                                     (cdr all-parts))))
+                (when mixed
+                  (error "SyntaxError: cannot mix bytes and nonbytes literals"))
+                ;; Store all parts as a list so eval can unquote each individually
+                (make-node 'clython.ast:constant-node
+                           :value (cons :concat-strings all-parts)
+                           :line (clython.ast:node-line first)
+                           :col (clython.ast:node-col first))))))))
 
 (defrule parse-keyword-constant
   ;; True, False, None, ... (Ellipsis)
@@ -564,11 +634,21 @@
           ;; Comma separating elements
           ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) ","))
            (ps-advance ps)
-           ;; Parse and push next element
-           (let ((elt (parse-star-expr-or-expr ps)))
-             (if (failp elt)
-                 (progn (ps-restore ps saved) (return +fail+))
-                 (push elt elts))))
+           ;; Check for trailing comma (creates single-element or trailing-comma tuple)
+           (let ((next-tok (ps-token ps)))
+             (when (and next-tok (eq (tok-type next-tok) :op)
+                        (string= (tok-value next-tok) ")"))
+               ;; Trailing comma — close the tuple
+               (ps-advance ps)
+               (return
+                 (make-node 'clython.ast:tuple-node
+                            :elts (nreverse elts) :ctx :load
+                            :line line :col col)))
+             ;; Parse next element
+             (let ((elt (parse-star-expr-or-expr ps)))
+               (if (failp elt)
+                   (progn (ps-restore ps saved) (return +fail+))
+                   (push elt elts)))))
           (t
            ;; Neither comma nor closing, invalid tuple syntax
            (ps-restore ps saved)
@@ -651,6 +731,48 @@
       (return-from nil
         (make-node 'clython.ast:dict-node :keys nil :values nil
                    :line line :col col)))
+    ;; Check for {**expr, ...} dict starting with double-star unpacking
+    (let ((star-tok (ps-token ps)))
+      (when (and star-tok (eq (tok-type star-tok) :op)
+                 (string= (tok-value star-tok) "**"))
+        (ps-advance ps)
+        (let ((expr (parse-expression-internal ps)))
+          (when (failp expr) (ps-restore ps saved) (return-from nil +fail+))
+          ;; Parse remaining key:value and **unpack pairs
+          (let ((keys (list nil))
+                (vals (list expr)))
+            (loop
+              (let ((comma (ps-token ps)))
+                (unless (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+                  (return))
+                (ps-advance ps))
+              (when (expect-close-brace ps) (return))
+              (let ((nxt (ps-token ps)))
+                (if (and nxt (eq (tok-type nxt) :op) (string= (tok-value nxt) "**"))
+                    (progn
+                      (ps-advance ps)
+                      (let ((e (parse-expression-internal ps)))
+                        (when (failp e) (return))
+                        (push nil keys)
+                        (push e vals)))
+                    (let ((k (parse-expression-internal ps)))
+                      (when (failp k) (return))
+                      (let ((colon (ps-token ps)))
+                        (unless (and colon (eq (tok-type colon) :op) (string= (tok-value colon) ":"))
+                          (return))
+                        (ps-advance ps))
+                      (let ((v (parse-expression-internal ps)))
+                        (when (failp v) (return))
+                        (push k keys)
+                        (push v vals))))))
+            (if (expect-close-brace ps)
+                (progn
+                  (ps-advance ps)
+                  (return-from nil
+                    (make-node 'clython.ast:dict-node
+                               :keys (nreverse keys) :values (nreverse vals)
+                               :line line :col col)))
+                (progn (ps-restore ps saved) (return-from nil +fail+)))))))
     ;; First expression
     (let ((first-expr (parse-expression-internal ps)))
       (when (failp first-expr)
@@ -745,7 +867,7 @@
           (return))
         (ps-advance ps))
       (when (expect-close-brace ps) (return))
-      (let ((elt (parse-expression-internal ps)))
+      (let ((elt (parse-star-expr-or-expr ps)))
         (when (failp elt) (return))
         (push elt elts)))
     (if (expect-close-brace ps)
@@ -1198,7 +1320,11 @@
                            `((and tok (eq (tok-type tok) :op) (string= (tok-value tok) ,op-str))
                              (ps-advance ps)
                              (let ((right (,child-rule ps)))
-                               (when (failp right) (return left))
+                               (when (failp right)
+                                 (error 'parser-error
+                                        :message (format nil "Expected expression after '~A'" ,op-str)
+                                        :line (tok-line tok)
+                                        :column (tok-col tok)))
                                (setf left
                                      (make-node 'clython.ast:bin-op-node
                                                 :left left :op ,ast-op :right right
@@ -1401,6 +1527,7 @@
    Returns a py-arguments instance."
   (let ((args '())
         (defaults '())
+        (posonlyargs '())
         (vararg nil)
         (kwonlyargs '())
         (kw-defaults '())
@@ -1414,6 +1541,12 @@
     (loop
       (let ((tok (ps-token ps)))
         (cond
+          ;; / — marks end of positional-only params
+          ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "/"))
+           (ps-advance ps)
+           ;; All args so far become positional-only, clear args
+           (setf posonlyargs (copy-list args)
+                 args nil))
           ;; **kwargs
           ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "**"))
            (ps-advance ps)
@@ -1461,6 +1594,7 @@
                    (string= (tok-value colon-check) ":"))
           (return))))
     (make-instance 'clython.ast:py-arguments
+                   :posonlyargs (nreverse posonlyargs)
                    :args (nreverse args)
                    :vararg vararg
                    :kwonlyargs (nreverse kwonlyargs)
@@ -1469,6 +1603,46 @@
                    :defaults (nreverse defaults))))
 
 ;;; --- Named expression (:=) ---
+
+(defrule parse-type-stmt
+  ;; type <name>[<params>] = <expr>  (PEP 695 soft keyword)
+  (let ((tok (ps-token ps)))
+    (if (and tok (eq (tok-type tok) :name) (string= (tok-value tok) "type"))
+        (let ((saved (ps-save ps)))
+          (ps-advance ps) ;; consume `type`
+          (let ((name-tok (ps-token ps)))
+            (if (and name-tok (eq (tok-type name-tok) :name))
+                (let ((name (tok-value name-tok)))
+                  (ps-advance ps)
+                  ;; Collect optional type params [T, ...]
+                  (let ((type-params '()))
+                    (let ((mb (ps-token ps)))
+                      (when (and mb (eq (tok-type mb) :op) (string= (tok-value mb) "["))
+                        (ps-advance ps) ;; consume [
+                        (loop
+                          (let ((tp (ps-token ps)))
+                            (when (or (null tp)
+                                      (and (eq (tok-type tp) :op) (string= (tok-value tp) "]")))
+                              (when tp (ps-advance ps)) ;; consume ]
+                              (return))
+                            (when (eq (tok-type tp) :name)
+                              (push (tok-value tp) type-params))
+                            (ps-advance ps)))))
+                    ;; Expect =
+                    (let ((eq-tok (ps-token ps)))
+                      (if (and eq-tok (eq (tok-type eq-tok) :op) (string= (tok-value eq-tok) "="))
+                          (progn
+                            (ps-advance ps)
+                            (let ((value (parse-expression-internal ps)))
+                              (if (failp value)
+                                  (progn (ps-restore ps saved) +fail+)
+                                  (make-node 'clython.ast:type-alias-node
+                                             :name name
+                                             :type-params (nreverse type-params)
+                                             :value value))))
+                          (progn (ps-restore ps saved) +fail+)))))
+                (progn (ps-restore ps saved) +fail+))))
+        +fail+)))
 
 (defrule parse-named-expr
   (let ((saved (ps-save ps))
@@ -1572,11 +1746,9 @@
                   ;; Skip problematic token and try to continue
                   (return))
                 (if (listp stmt)
-                    (setf stmts (append stmts stmt))
+                    (dolist (s stmt) (push s stmts))
                     (push stmt stmts))))
-            (if (listp (car stmts))
-                stmts ; already in order from append
-                (nreverse stmts))))
+            (nreverse stmts)))
         ;; Inline suite: simple statements on same line
         (parse-simple-stmt-list ps))))
 
@@ -1619,6 +1791,7 @@
             #'parse-from-import-stmt
             #'parse-global-stmt
             #'parse-nonlocal-stmt
+            #'parse-type-stmt
             #'parse-assignment-or-expr)
            ps))
 
@@ -1893,12 +2066,11 @@
               (let ((e (parse-star-expr-or-expr ps)))
                 (when (failp e) (return))
                 (push e elts))))
-          (if (= (length elts) 1)
-              first-expr
-              (make-node 'clython.ast:tuple-node
-                         :elts (nreverse elts) :ctx ctx
-                         :line (clython.ast:node-line first-expr)
-                         :col (clython.ast:node-col first-expr))))
+          ;; Always produce a tuple when comma was seen (even single-element trailing comma)
+          (make-node 'clython.ast:tuple-node
+                     :elts (nreverse elts) :ctx ctx
+                     :line (clython.ast:node-line first-expr)
+                     :col (clython.ast:node-col first-expr)))
         first-expr)))
 
 (defrule parse-assignment-or-expr
@@ -2617,20 +2789,46 @@
          (if (failp expr) +fail+
              (make-node 'clython.ast:match-value-node :value expr
                         :line (tok-line tok) :col (tok-col tok)))))
-      ;; Name (capture pattern or value pattern if dotted)
+      ;; Name — could be capture, value (dotted), or class pattern (Name(...))
       ((and tok (eq (tok-type tok) :name))
-       (let ((expr (parse-primary ps)))
-         (if (failp expr) +fail+
-             ;; Simple name -> capture if not dotted, value if dotted
-             (if (typep expr 'clython.ast:name-node)
-                 (make-node 'clython.ast:match-as-node
-                            :pattern nil
-                            :name (clython.ast:name-node-id expr)
-                            :line (clython.ast:node-line expr)
-                            :col (clython.ast:node-col expr))
-                 (make-node 'clython.ast:match-value-node :value expr
-                            :line (clython.ast:node-line expr)
-                            :col (clython.ast:node-col expr))))))
+       ;; Consume the name token
+       (ps-advance ps)
+       (let* ((name-str (tok-value tok))
+              (line (tok-line tok))
+              (col (tok-col tok))
+              (name-node (make-node 'clython.ast:name-node :id name-str :line line :col col))
+              (next (ps-token ps)))
+         ;; Check for dotted name: Name.attr (value pattern)
+         (cond
+           ((and next (eq (tok-type next) :op) (string= (tok-value next) "."))
+            ;; Dotted name — parse as primary starting from the dot
+            ;; Build into an attribute access: parse remaining dots
+            (let ((expr name-node))
+              (loop while (let ((dot (ps-token ps)))
+                            (and dot (eq (tok-type dot) :op) (string= (tok-value dot) ".")))
+                    do (ps-advance ps)  ;; consume '.'
+                       (let ((attr-tok (ps-token ps)))
+                         (when (and attr-tok (eq (tok-type attr-tok) :name))
+                           (ps-advance ps)
+                           (setf expr (make-node 'clython.ast:attribute-node
+                                                 :value expr
+                                                 :attr (tok-value attr-tok)
+                                                 :line (tok-line attr-tok) :col (tok-col attr-tok))))))
+              ;; After dotted name, check for class pattern: Name.attr(
+              (let ((paren (ps-token ps)))
+                (if (and paren (eq (tok-type paren) :op) (string= (tok-value paren) "("))
+                    (%parse-match-class-pattern expr ps)
+                    (make-node 'clython.ast:match-value-node :value expr
+                               :line line :col col)))))
+           ;; Class pattern: Name(...)
+           ((and next (eq (tok-type next) :op) (string= (tok-value next) "("))
+            (%parse-match-class-pattern name-node ps))
+           ;; Simple name → capture pattern
+           (t
+            (make-node 'clython.ast:match-as-node
+                       :pattern nil
+                       :name name-str
+                       :line line :col col)))))
       ;; [ ] sequence pattern
       ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "["))
        (ps-advance ps)
@@ -2640,9 +2838,37 @@
              (when (and close (eq (tok-type close) :op) (string= (tok-value close) "]"))
                (ps-advance ps)
                (return)))
-           (let ((p (parse-match-or-pattern ps)))
-             (when (failp p) (return))
-             (push p patterns))
+           ;; Check for *name star pattern
+           (let ((star-tok (ps-token ps)))
+             (if (and star-tok (eq (tok-type star-tok) :op) (string= (tok-value star-tok) "*"))
+                 (progn
+                   (ps-advance ps)
+                   (let ((name-tok (ps-token ps)))
+                     (cond
+                       ;; *name
+                       ((and name-tok (eq (tok-type name-tok) :name)
+                             (not (string= (tok-value name-tok) "_")))
+                        (push (make-node 'clython.ast:match-star-node
+                                         :name (tok-value name-tok)
+                                         :line (tok-line star-tok) :col (tok-col star-tok))
+                              patterns)
+                        (ps-advance ps))
+                       ;; *_ (wildcard star)
+                       ((and name-tok (eq (tok-type name-tok) :name)
+                             (string= (tok-value name-tok) "_"))
+                        (push (make-node 'clython.ast:match-star-node
+                                         :name nil
+                                         :line (tok-line star-tok) :col (tok-col star-tok))
+                              patterns)
+                        (ps-advance ps))
+                       ;; bare * (shouldn't happen in patterns, but handle)
+                       (t (push (make-node 'clython.ast:match-star-node :name nil
+                                           :line (tok-line star-tok) :col (tok-col star-tok))
+                                patterns)))))
+                 ;; Regular pattern
+                 (let ((p (parse-match-or-pattern ps)))
+                   (when (failp p) (return))
+                   (push p patterns))))
            (let ((comma (ps-token ps)))
              (when (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
                (ps-advance ps))))
@@ -2691,7 +2917,116 @@
                  (if (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
                      (progn (ps-advance ps) first)
                      +fail+))))))
+      ;; { } mapping pattern
+      ((and tok (eq (tok-type tok) :op) (string= (tok-value tok) "{"))
+       (ps-advance ps)
+       (let ((keys '()) (patterns '()) (rest-name nil))
+         (loop
+           (let ((close (ps-token ps)))
+             (when (and close (eq (tok-type close) :op) (string= (tok-value close) "}"))
+               (ps-advance ps)
+               (return)))
+           ;; Check for **rest
+           (let ((star-tok (ps-token ps)))
+             (when (and star-tok (eq (tok-type star-tok) :op)
+                        (string= (tok-value star-tok) "**"))
+               (ps-advance ps)
+               (let ((name-tok (ps-token ps)))
+                 (when (and name-tok (eq (tok-type name-tok) :name))
+                   (setf rest-name (tok-value name-tok))
+                   (ps-advance ps)))
+               ;; Skip optional comma
+               (let ((c (ps-token ps)))
+                 (when (and c (eq (tok-type c) :op) (string= (tok-value c) ","))
+                   (ps-advance ps)))
+               ;; Continue to check for close brace
+               (let ((close (ps-token ps)))
+                 (when (and close (eq (tok-type close) :op) (string= (tok-value close) "}"))
+                   (ps-advance ps)))
+               (return)))
+           ;; key: pattern
+           (let ((key-expr (parse-atom ps)))
+             (when (failp key-expr) (return))
+             (push key-expr keys)
+             ;; Expect :
+             (let ((colon (ps-token ps)))
+               (unless (and colon (eq (tok-type colon) :op) (string= (tok-value colon) ":"))
+                 (return))
+               (ps-advance ps))
+             (let ((p (parse-match-or-pattern ps)))
+               (when (failp p) (return))
+               (push p patterns)))
+           ;; Optional comma
+           (let ((comma (ps-token ps)))
+             (when (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+               (ps-advance ps))))
+         (make-node 'clython.ast:match-mapping-node
+                    :keys (nreverse keys)
+                    :patterns (nreverse patterns)
+                    :rest rest-name
+                    :line (tok-line tok) :col (tok-col tok))))
       (t +fail+))))
+
+(defun %parse-match-class-pattern (cls-expr ps)
+  "Parse a class pattern: ClassName(pos_pat, ..., key=pat, ...).
+   CLS-EXPR is the already-parsed class name/dotted-name expression.
+   The '(' has NOT been consumed yet."
+  (ps-advance ps) ;; consume '('
+  (let ((pos-pats '())
+        (kwd-attrs '())
+        (kwd-pats '())
+        (in-keywords nil))
+    ;; Parse arguments until ')'
+    (loop
+      (let ((close (ps-token ps)))
+        (when (and close (eq (tok-type close) :op) (string= (tok-value close) ")"))
+          (ps-advance ps)
+          (return)))
+      ;; Check for keyword=pattern: NAME '='
+      (let ((saved (ps-save ps))
+            (maybe-name (ps-token ps)))
+        (if (and maybe-name (eq (tok-type maybe-name) :name))
+            (progn
+              (ps-advance ps)
+              (let ((eq-tok (ps-token ps)))
+                (if (and eq-tok (eq (tok-type eq-tok) :op) (string= (tok-value eq-tok) "="))
+                    ;; Keyword argument
+                    (progn
+                      (ps-advance ps)
+                      (setf in-keywords t)
+                      (let ((pat (parse-match-pattern ps)))
+                        (if (failp pat)
+                            (return)
+                            (progn
+                              (push (tok-value maybe-name) kwd-attrs)
+                              (push pat kwd-pats)))))
+                    ;; Not a keyword — restore and parse as positional
+                    (progn
+                      (ps-restore ps saved)
+                      (if in-keywords
+                          (return) ;; positional after keyword is an error; bail
+                          (let ((pat (parse-match-pattern ps)))
+                            (if (failp pat)
+                                (return)
+                                (push pat pos-pats))))))))
+            ;; Not a name — parse as positional pattern
+            (if in-keywords
+                (return)
+                (let ((pat (parse-match-pattern ps)))
+                  (if (failp pat)
+                      (return)
+                      (push pat pos-pats))))))
+      ;; Skip comma
+      (let ((comma (ps-token ps)))
+        (when (and comma (eq (tok-type comma) :op) (string= (tok-value comma) ","))
+          (ps-advance ps))))
+    (make-node 'clython.ast:match-class-node
+               :cls cls-expr
+               :patterns (nreverse pos-pats)
+               :kwd-attrs (nreverse kwd-attrs)
+               :kwd-patterns (nreverse kwd-pats)
+               :line (clython.ast:node-line cls-expr)
+               :col (clython.ast:node-col cls-expr))))
 
 (defrule parse-match-pattern
   ;; Top-level entry point for pattern parsing

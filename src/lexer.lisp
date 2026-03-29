@@ -223,7 +223,8 @@
                                 (make-string 3 :initial-element quote-char)))
            (close-str  (if triple-p
                            (make-string 3 :initial-element quote-char)
-                           (string quote-char))))
+                           (string quote-char)))
+)
 
       ;; Consume opening quote(s)
       (write-string (ls-peek-string ls (if triple-p 3 1)) buf)
@@ -304,13 +305,30 @@
                   (t
                    ;; Integer part (may be empty for .5 style)
                    (unless (char= (ls-char ls) #\.)
-                     (loop do
-                       (when (digit-p (ls-char ls))
-                         (write-char (ls-advance ls) buf))
-                       (when (and (eql (ls-char ls) #\_)
-                                  (digit-p (ls-char ls 1)))
-                         (write-char (ls-advance ls) buf))
-                       while (digit-p (ls-char ls))))
+                     (let ((first-digit (ls-char ls)))
+                       (loop do
+                         (when (digit-p (ls-char ls))
+                           (write-char (ls-advance ls) buf))
+                         (when (and (eql (ls-char ls) #\_)
+                                    (digit-p (ls-char ls 1)))
+                           (write-char (ls-advance ls) buf))
+                         while (digit-p (ls-char ls)))
+                       ;; Check for leading zeros (e.g. 01, 007)
+                       (let ((int-part (get-output-stream-string buf)))
+                         ;; Reset buffer with the int-part content
+                         (write-string int-part buf)
+                         (when (and (char= first-digit #\0)
+                                    (> (length int-part) 1)
+                                    ;; Allow all-zeros (00, 000, 0_0, etc.)
+                                    (find-if (lambda (c) (and (digit-char-p c) (char/= c #\0))) int-part)
+                                    (not (eql (ls-char ls) #\.))  ;; allow 0.5
+                                    (not (eql (ls-char ls) #\e))  ;; allow 0e1
+                                    (not (eql (ls-char ls) #\E))
+                                    (not (eql (ls-char ls) #\j))  ;; allow 0j
+                                    (not (eql (ls-char ls) #\J)))
+                           (error 'lexer-error
+                                  :message "leading zeros in decimal integer literals are not permitted"
+                                  :line save-line :column save-col)))))
                    ;; Fractional part
                    (when (and (eql (ls-char ls) #\.)
                               ;; avoid consuming .. or .identifier
@@ -341,6 +359,14 @@
                    ;; Complex suffix j/J
                    (when (member (ls-char ls) '(#\j #\J))
                      (write-char (ls-advance ls) buf)))))))
+        ;; Reject digit-start identifiers like 1invalid (SyntaxError in CPython)
+        (when (and (ls-char ls)
+                   (identifier-start-p (ls-char ls))
+                   ;; Don't reject j/J — already consumed as complex suffix
+                   )
+          (error 'lexer-error
+                 :message "invalid decimal literal"
+                 :line save-line :column save-col))
         (ls-emit ls :number value save-line save-col)))))
 
 (defun scan-identifier (ls)

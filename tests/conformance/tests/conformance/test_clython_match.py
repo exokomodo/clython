@@ -487,3 +487,198 @@ match 1:
 """)
         assert rc == 0
         assert out == "first"
+
+
+# ── Mapping patterns ─────────────────────────────────────────────────────────
+
+
+class TestMatchMapping:
+    """Test mapping (dict) patterns from Section 8.10."""
+
+    def test_dict_pattern_basic(self):
+        out, _, rc = clython_run("""
+match {"action": "move", "x": 5}:
+    case {"action": "move", "x": x}:
+        print(f"move to {x}")
+    case _:
+        print("other")
+""")
+        assert rc == 0
+        assert out == "move to 5"
+
+    def test_dict_pattern_subset(self):
+        """Dict patterns match if keys are present (extra keys allowed)."""
+        out, _, rc = clython_run("""
+match {"a": 1, "b": 2, "c": 3}:
+    case {"a": a, "b": b}:
+        print(f"{a} {b}")
+""")
+        assert rc == 0
+        assert out == "1 2"
+
+    def test_dict_pattern_rest(self):
+        out, _, rc = clython_run("""
+match {"x": 1, "y": 2, "z": 3}:
+    case {"x": x, **rest}:
+        print(x, sorted(rest.keys()))
+""")
+        assert rc == 0
+        assert out == "1 ['y', 'z']"
+
+
+# ── Class patterns ───────────────────────────────────────────────────────────
+
+
+class TestMatchClass:
+    """Test class patterns from Section 8.10."""
+
+    def test_class_pattern_basic(self):
+        out, _, rc = clython_run("""
+class Point:
+    __match_args__ = ("x", "y")
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+match Point(1, 2):
+    case Point(x, y):
+        print(f"{x} {y}")
+""")
+        assert rc == 0
+        assert out == "1 2"
+
+    def test_class_pattern_keyword(self):
+        out, _, rc = clython_run("""
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+match Point(3, 4):
+    case Point(x=3, y=y):
+        print(f"x=3, y={y}")
+    case _:
+        print("other")
+""")
+        assert rc == 0
+        assert out == "x=3, y=4"
+
+
+# ── As patterns ──────────────────────────────────────────────────────────────
+
+
+class TestMatchAs:
+    """Test as patterns from Section 8.10."""
+
+    def test_as_pattern_basic(self):
+        out, _, rc = clython_run("""
+match (1, 2):
+    case (1, y) as point:
+        print(f"y={y} point={point}")
+""")
+        assert rc == 0
+        assert out == "y=2 point=(1, 2)"
+
+    def test_as_pattern_with_or(self):
+        out, _, rc = clython_run("""
+match 2:
+    case (1 | 2 | 3) as x:
+        print(f"small: {x}")
+    case _:
+        print("other")
+""")
+        assert rc == 0
+        assert out == "small: 2"
+
+
+# ── Star patterns in sequences ───────────────────────────────────────────────
+
+
+class TestMatchStarPattern:
+    """Test star (*) patterns in sequences from Section 8.10."""
+
+    def test_star_pattern_rest(self):
+        out, _, rc = clython_run("""
+match [1, 2, 3, 4]:
+    case [first, *rest]:
+        print(f"{first} {rest}")
+""")
+        assert rc == 0
+        assert out == "1 [2, 3, 4]"
+
+    def test_star_pattern_middle(self):
+        out, _, rc = clython_run("""
+match [1, 2, 3, 4, 5]:
+    case [first, *middle, last]:
+        print(f"{first} {middle} {last}")
+""")
+        assert rc == 0
+        assert out == "1 [2, 3, 4] 5"
+
+    def test_star_pattern_empty(self):
+        out, _, rc = clython_run("""
+match [1]:
+    case [x, *rest]:
+        print(f"{x} {rest}")
+""")
+        assert rc == 0
+        assert out == "1 []"
+
+
+# ── Complex match patterns ───────────────────────────────────────────────────
+
+
+class TestMatchComplex:
+    """Test complex/combined match patterns from Section 8.10."""
+
+    def test_match_with_computation_in_body(self):
+        out, _, rc = clython_run("""
+match (3, 4):
+    case (x, y):
+        import math
+        dist = math.sqrt(x**2 + y**2)
+        print(dist)
+""")
+        assert rc == 0
+        assert out == "5.0"
+
+    def test_match_string_patterns(self):
+        out, _, rc = clython_run("""
+commands = ["quit", "hello", "unknown"]
+results = []
+for cmd in commands:
+    match cmd:
+        case "quit":
+            results.append("q")
+        case "hello":
+            results.append("h")
+        case _:
+            results.append("?")
+print(results)
+""")
+        assert rc == 0
+        assert out == "['q', 'h', '?']"
+
+    def test_match_nested_in_if(self):
+        out, _, rc = clython_run("""
+x = 5
+if x > 0:
+    match x:
+        case 5:
+            print("five")
+        case _:
+            print("other positive")
+""")
+        assert rc == 0
+        assert out == "five"
+
+    def test_match_float_literal(self):
+        out, _, rc = clython_run("""
+match 3.14:
+    case 3.14:
+        print("pi-ish")
+    case _:
+        print("other")
+""")
+        assert rc == 0
+        assert out == "pi-ish"
