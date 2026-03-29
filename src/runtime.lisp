@@ -154,6 +154,7 @@
    #:py-setattr
    #:py-delattr
    #:py-getitem
+   #:py-getitem-or-nil
    #:py-setitem
    #:py-delitem
    #:py-len
@@ -2164,6 +2165,11 @@
     (unless found
       (py-raise "KeyError" "~A" (py-repr key)))
     val))
+
+(defun py-getitem-or-nil (dict key)
+  "Return the value for KEY in DICT, or NIL if not found. Does not raise."
+  (when (typep dict 'py-dict)
+    (gethash (dict-hash-key key) (py-dict-value dict))))
 
 (defmethod py-setitem ((obj py-dict) key value)
   (setf (gethash (dict-hash-key key) (py-dict-value obj)) value))
