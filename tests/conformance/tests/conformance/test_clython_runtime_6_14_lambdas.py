@@ -137,7 +137,6 @@ def test_lambda_with_arithmetic():
     assert out == "20"
 
 
-@pytest.mark.xfail(reason="Clython may not support keyword-only params in lambda")
 def test_lambda_keyword_only_param():
     out, err, rc = clython_run("f = lambda *, x: x * 2; print(f(x=7))")
     assert rc == 0
@@ -172,7 +171,6 @@ def test_lambda_with_boolean_ops():
     assert out == "True\nFalse"
 
 
-@pytest.mark.xfail(reason="Clython functools.reduce may not be implemented")
 def test_lambda_in_reduce():
     source = """
 from functools import reduce

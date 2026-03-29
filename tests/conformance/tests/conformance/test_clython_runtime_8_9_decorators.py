@@ -210,7 +210,6 @@ def test_decorator_preserves_callable():
     assert out == "True\nhi"
 
 
-@pytest.mark.xfail(reason="**kwargs not passed through *args/**kwargs spread in Clython")
 def test_decorator_with_args_and_kwargs():
     """Decorator that passes args and kwargs through"""
     out, err, rc = clython_run(

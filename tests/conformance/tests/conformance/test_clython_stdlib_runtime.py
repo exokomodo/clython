@@ -114,7 +114,6 @@ class TestStringModule:
 class TestCollectionsModule:
     """Tests for the collections stdlib module."""
 
-    @pytest.mark.xfail(reason="collections.OrderedDict not implemented in Clython")
     def test_ordereddict_create_and_iterate(self):
         out, _, rc = clython_run(
             "import collections\n"
@@ -126,7 +125,6 @@ class TestCollectionsModule:
         assert rc == 0
         assert out == "['x', 'y']"
 
-    @pytest.mark.xfail(reason="collections.namedtuple not implemented in Clython")
     def test_namedtuple_creates_class(self):
         out, _, rc = clython_run(
             "import collections\n"
@@ -137,7 +135,6 @@ class TestCollectionsModule:
         # namedtuple returns a class (type)
         assert out in ("type", "function")
 
-    @pytest.mark.xfail(reason="collections.namedtuple not implemented in Clython")
     def test_namedtuple_instance_attribute(self):
         out, _, rc = clython_run(
             "import collections\n"
@@ -148,7 +145,6 @@ class TestCollectionsModule:
         assert rc == 0
         assert out == "3"
 
-    @pytest.mark.xfail(reason="collections.Counter not implemented in Clython")
     def test_counter_counts_chars(self):
         out, _, rc = clython_run(
             "import collections\n"
@@ -158,7 +154,6 @@ class TestCollectionsModule:
         assert rc == 0
         assert out == "2"
 
-    @pytest.mark.xfail(reason="collections.deque not implemented in Clython")
     def test_deque_popleft(self):
         out, _, rc = clython_run(
             "import collections\n"
@@ -231,13 +226,11 @@ class TestMathModule:
         assert rc == 0
         assert out == "4"
 
-    @pytest.mark.xfail(reason="math.factorial not implemented in Clython")
     def test_factorial(self):
         out, _, rc = clython_run("import math\nprint(math.factorial(5))")
         assert rc == 0
         assert out == "120"
 
-    @pytest.mark.xfail(reason="math.gcd not implemented in Clython")
     def test_gcd(self):
         out, _, rc = clython_run("import math\nprint(math.gcd(12, 8))")
         assert rc == 0
@@ -262,7 +255,6 @@ class TestMathModule:
 class TestFunctoolsModule:
     """Tests for the functools stdlib module."""
 
-    @pytest.mark.xfail(reason="functools module fails to load in Clython (LexerError)")
     def test_reduce(self):
         out, _, rc = clython_run(
             "import functools\n"
@@ -271,7 +263,6 @@ class TestFunctoolsModule:
         assert rc == 0
         assert out == "6"
 
-    @pytest.mark.xfail(reason="functools module fails to load in Clython (LexerError)")
     def test_partial(self):
         out, _, rc = clython_run(
             "import functools\n"
@@ -282,7 +273,6 @@ class TestFunctoolsModule:
         assert rc == 0
         assert out == "8"
 
-    @pytest.mark.xfail(reason="functools module fails to load in Clython (LexerError)")
     def test_lru_cache_decorator(self):
         out, _, rc = clython_run(
             "import functools\n"
@@ -303,7 +293,6 @@ class TestFunctoolsModule:
 class TestItertoolsModule:
     """Tests for the itertools stdlib module."""
 
-    @pytest.mark.xfail(reason="itertools module not found in Clython")
     def test_islice(self):
         out, _, rc = clython_run(
             "import itertools\n"
@@ -312,7 +301,6 @@ class TestItertoolsModule:
         assert rc == 0
         assert out == "[3, 4]"
 
-    @pytest.mark.xfail(reason="itertools module not found in Clython")
     def test_chain(self):
         out, _, rc = clython_run(
             "import itertools\n"

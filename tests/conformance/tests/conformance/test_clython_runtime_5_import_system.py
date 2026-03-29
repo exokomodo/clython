@@ -91,7 +91,6 @@ print(type(data).__name__)
     assert out == "[1, 2, 3]\nlist"
 
 
-@pytest.mark.xfail(reason="Clython json module may not be implemented")
 def test_import_json_dumps():
     source = """
 import json
@@ -117,7 +116,6 @@ print(d['key'])
     assert out == "2"
 
 
-@pytest.mark.xfail(reason="Clython collections module may not be implemented")
 def test_import_collections_counter():
     source = """
 from collections import Counter
@@ -168,7 +166,6 @@ print('os' in sys.modules)
     assert out == "True"
 
 
-@pytest.mark.xfail(reason="Clython functools module may not be implemented")
 def test_import_functools():
     source = """
 from functools import reduce
@@ -180,7 +177,6 @@ print(result)
     assert out == "120"
 
 
-@pytest.mark.xfail(reason="Clython itertools module may not be implemented")
 def test_import_itertools():
     source = """
 from itertools import chain

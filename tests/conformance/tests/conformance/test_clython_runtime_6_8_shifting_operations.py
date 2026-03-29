@@ -197,7 +197,6 @@ def test_pack_bytes():
 # Error conditions
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="Clython does not raise on negative shift count")
 def test_negative_shift_count_raises():
     """Shifting by a negative count should raise ValueError."""
     out, err, rc = clython_run("print(1 << -1)")
@@ -212,7 +211,6 @@ def test_shift_in_function():
     assert out == "10"
 
 
-@pytest.mark.xfail(reason="Float shifting may produce different error message in Clython")
 def test_float_shift_raises():
     """Shifting a float should raise TypeError."""
     out, err, rc = clython_run("print(3.14 << 1)")
