@@ -231,10 +231,30 @@ class TestMathModule:
         assert rc == 0
         assert out == "120"
 
+    def test_factorial_zero(self):
+        out, _, rc = clython_run("import math\nprint(math.factorial(0))")
+        assert rc == 0
+        assert out == "1"
+
+    def test_factorial_large(self):
+        out, _, rc = clython_run("import math\nprint(math.factorial(10))")
+        assert rc == 0
+        assert out == "3628800"
+
     def test_gcd(self):
         out, _, rc = clython_run("import math\nprint(math.gcd(12, 8))")
         assert rc == 0
         assert out == "4"
+
+    def test_gcd_coprime(self):
+        out, _, rc = clython_run("import math\nprint(math.gcd(7, 13))")
+        assert rc == 0
+        assert out == "1"
+
+    def test_gcd_zero(self):
+        out, _, rc = clython_run("import math\nprint(math.gcd(0, 5))")
+        assert rc == 0
+        assert out == "5"
 
     def test_sqrt(self):
         out, _, rc = clython_run("import math\nprint(math.sqrt(4))")
