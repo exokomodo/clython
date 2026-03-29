@@ -1727,6 +1727,10 @@
     (if (and tok (eq (tok-type tok) :newline))
         (progn
           (ps-advance ps) ; consume NEWLINE
+          ;; Skip any extra NEWLINEs from comment-only lines before the first
+          ;; real statement (CPython treats comment-only lines as if they don't
+          ;; exist, so the INDENT token may be delayed past their NEWLINEs).
+          (skip-newlines ps)
           ;; Expect INDENT
           (let ((indent-tok (ps-token ps)))
             (unless (and indent-tok (eq (tok-type indent-tok) :indent))

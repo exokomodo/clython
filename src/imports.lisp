@@ -708,6 +708,67 @@
                           clython.runtime:+py-false+)))))
     mod))
 
+;;;; ─── string module ─────────────────────────────────────────────────────────
+
+(defun make-string-module ()
+  "Create a string module with ASCII constants and capwords."
+  (let ((mod (clython.runtime:make-py-module "string")))
+    (let ((d (clython.runtime:py-module-dict mod)))
+      (setf (gethash "__name__" d) (clython.runtime:make-py-str "string"))
+      (setf (gethash "ascii_lowercase" d)
+            (clython.runtime:make-py-str "abcdefghijklmnopqrstuvwxyz"))
+      (setf (gethash "ascii_uppercase" d)
+            (clython.runtime:make-py-str "ABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+      (setf (gethash "ascii_letters" d)
+            (clython.runtime:make-py-str "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"))
+      (setf (gethash "digits" d)
+            (clython.runtime:make-py-str "0123456789"))
+      (setf (gethash "hexdigits" d)
+            (clython.runtime:make-py-str "0123456789abcdefABCDEF"))
+      (setf (gethash "octdigits" d)
+            (clython.runtime:make-py-str "01234567"))
+      (setf (gethash "punctuation" d)
+            (clython.runtime:make-py-str "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"))
+      (setf (gethash "whitespace" d)
+            (clython.runtime:make-py-str (format nil " ~C~C~C~C~C"
+                                                 #\Tab #\Newline #\Return
+                                                 (code-char 11) (code-char 12))))
+      (setf (gethash "printable" d)
+            (clython.runtime:make-py-str
+             (with-output-to-string (s)
+               (dotimes (i 128)
+                 (let ((c (code-char i)))
+                   (when (or (alphanumericp c)
+                             (member c '(#\Space #\! #\" #\# #\$ #\% #\& #\' #\( #\) #\* #\+
+                                        #\, #\- #\. #\/ #\: #\; #\< #\= #\> #\? #\@ #\[ #\\
+                                        #\] #\^ #\_ #\` #\{ #\| #\} #\~ #\Tab #\Newline
+                                        #\Return (code-char 11) (code-char 12))))
+                     (write-char c s)))))))
+      ;; capwords(s, sep=None)
+      (setf (gethash "capwords" d)
+            (clython.runtime:make-py-function
+             :name "capwords"
+             :cl-fn (lambda (&rest args)
+                      (let* ((s (clython.runtime:py-str-value (first args)))
+                             (sep (if (and (second args)
+                                          (not (eq (second args) clython.runtime:+py-none+)))
+                                      (clython.runtime:py-str-value (second args))
+                                      nil))
+                             (words (if sep
+                                        (uiop:split-string s :separator sep)
+                                        (uiop:split-string
+                                         (string-trim '(#\Space #\Tab #\Newline #\Return) s)
+                                         :separator " ")))
+                             (result (format nil "~{~A~^ ~}"
+                                             (mapcar (lambda (w)
+                                                       (if (string= w "") w
+                                                           (concatenate 'string
+                                                                        (string (char-upcase (char w 0)))
+                                                                        (string-downcase (subseq w 1)))))
+                                                     words))))
+                        (clython.runtime:make-py-str result))))))
+    mod))
+
 ;;;; ─── itertools module ─────────────────────────────────────────────────────
 
 (defun make-itertools-module ()
@@ -780,6 +841,44 @@
                           (clython.runtime:make-py-list
                            (loop repeat times collect obj))
                           clython.runtime:+py-none+)))))
+    mod))
+
+;;;; ─── re module ──────────────────────────────────────────────────────────────
+
+(defun make-re-module ()
+  "Create a re module with flags and basic stub operations."
+  (let ((mod (clython.runtime:make-py-module "re")))
+    (let ((d (clython.runtime:py-module-dict mod)))
+      (setf (gethash "__name__" d) (clython.runtime:make-py-str "re"))
+      ;; Flags (matching CPython re module values)
+      (dolist (flag-pair '(("IGNORECASE" . 2) ("I" . 2)
+                           ("MULTILINE" . 8) ("M" . 8)
+                           ("DOTALL" . 16) ("S" . 16)
+                           ("VERBOSE" . 64) ("X" . 64)
+                           ("ASCII" . 256) ("A" . 256)
+                           ("UNICODE" . 32) ("U" . 32)
+                           ("LOCALE" . 4) ("L" . 4)
+                           ("NOFLAG" . 0)))
+        (setf (gethash (car flag-pair) d)
+              (clython.runtime:make-py-int (cdr flag-pair))))
+      ;; error exception class stub
+      (setf (gethash "error" d)
+            (clython.runtime:make-py-type :name "error"))
+      ;; compile(pattern, flags=0) — returns a stub Pattern object
+      (setf (gethash "compile" d)
+            (clython.runtime:make-py-function
+             :name "compile"
+             :cl-fn (lambda (&rest args)
+                      (declare (ignore args))
+                      (clython.runtime:+py-none+))))
+      ;; sub, match, search, findall — stubs
+      (dolist (fname '("sub" "match" "search" "fullmatch" "findall" "finditer" "split"))
+        (let ((fn fname))
+          (setf (gethash fn d)
+                (clython.runtime:make-py-function
+                 :name fn
+                 :cl-fn (lambda (&rest args) (declare (ignore args))
+                          clython.runtime:+py-none+))))))
     mod))
 
 ;;;; ─── functools module ──────────────────────────────────────────────────────
@@ -873,7 +972,22 @@
   (setf (gethash "fractions" *builtin-modules*) #'make-fractions-module)
   (setf (gethash "keyword" *builtin-modules*) #'make-keyword-module)
   (setf (gethash "itertools" *builtin-modules*) #'make-itertools-module)
-  (setf (gethash "functools" *builtin-modules*) #'make-functools-module))
+  (setf (gethash "string" *builtin-modules*) #'make-string-module)
+  (setf (gethash "functools" *builtin-modules*) #'make-functools-module)
+  ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
+  (setf (gethash "re" *builtin-modules*) #'make-re-module)
+  (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"
+                  "_weakrefset" "_py_abc" "abc" "types" "warnings"
+                  "io" "stat" "posix" "errno" "copy" "heapq" "reprlib"
+                  "numbers" "codecs" "copyreg" "operator" "threading" "enum"
+                  "_sre" "sre_compile" "sre_parse" "sre_constants" "random"
+                  "importlib" "dataclasses" "subprocess" "inspect"
+                  "contextlib" "weakref" "ntpath" "genericpath"
+                  "_imp" "signal" "abc" "token" "tokenize"))
+    (unless (gethash name *builtin-modules*)
+      (let ((n name))  ; capture for closure
+        (setf (gethash n *builtin-modules*)
+              (lambda () (make-stub-module n)))))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Module finder

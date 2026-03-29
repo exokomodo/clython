@@ -42,37 +42,31 @@ pytestmark = pytest.mark.skipif(
 class TestStringModule:
     """Tests for the string stdlib module."""
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_ascii_lowercase(self):
         out, _, rc = clython_run("import string\nprint(string.ascii_lowercase)")
         assert rc == 0
         assert out == "abcdefghijklmnopqrstuvwxyz"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_ascii_uppercase(self):
         out, _, rc = clython_run("import string\nprint(string.ascii_uppercase)")
         assert rc == 0
         assert out == "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_digits(self):
         out, _, rc = clython_run("import string\nprint(string.digits)")
         assert rc == 0
         assert out == "0123456789"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_whitespace_contains_space(self):
         out, _, rc = clython_run("import string\nprint(' ' in string.whitespace)")
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_whitespace_contains_newline(self):
         out, _, rc = clython_run(r"import string" + "\nprint('\\n' in string.whitespace)")
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_ascii_letters_is_lower_plus_upper(self):
         out, _, rc = clython_run(
             "import string\n"
@@ -81,25 +75,21 @@ class TestStringModule:
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_hexdigits_contains_0(self):
         out, _, rc = clython_run("import string\nprint('0' in string.hexdigits)")
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_hexdigits_contains_a(self):
         out, _, rc = clython_run("import string\nprint('a' in string.hexdigits)")
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_hexdigits_contains_F(self):
         out, _, rc = clython_run("import string\nprint('F' in string.hexdigits)")
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(reason="string module parse error in Clython")
     def test_punctuation_contains_bang(self):
         out, _, rc = clython_run("import string\nprint('!' in string.punctuation)")
         assert rc == 0
