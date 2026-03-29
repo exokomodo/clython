@@ -163,7 +163,6 @@ class TestCollectionsModule:
         assert rc == 0
         assert out == "1"
 
-    @pytest.mark.xfail(reason="collections.ChainMap not implemented in Clython")
     def test_chainmap_lookup(self):
         out, _, rc = clython_run(
             "import collections\n"
