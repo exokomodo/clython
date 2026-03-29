@@ -135,9 +135,14 @@
           ((typep obj 'py-float) (make-py-int (truncate (py-float-value obj))))
           ((typep obj 'py-bool)  (make-py-int (if (py-bool-raw obj) 1 0)))
           ((typep obj 'py-str)
-           (make-py-int
-            (parse-integer (py-str-value obj)
-                           :radix (if base (py-int-value base) 10))))
+           (let ((s (string-trim '(#\Space #\Tab #\Newline #\Return) (py-str-value obj))))
+             (handler-case
+                 (make-py-int
+                  (parse-integer s :radix (if base (py-int-value base) 10)))
+               (error ()
+                 (clython.runtime:py-raise "ValueError"
+                   "invalid literal for int() with base ~A: ~S"
+                   (if base (py-int-value base) 10) s)))))
           (t (clython.runtime:py-raise "TypeError" "int() argument must be a string, a bytes-like object or a real number, not '~A'"
                     (py-type-of obj)))))))
 

@@ -169,6 +169,9 @@
    #:py-exception-class-name
    #:py-exception-args
    #:py-exception-message
+   #:py-exception-context
+   #:py-exception-cause
+   #:py-exception-suppress
    #:make-py-exception-object
    #:*exception-hierarchy*
    #:exception-is-subclass-p
@@ -2631,7 +2634,13 @@
                :documentation "Exception arguments (list of py-objects)")
    (message    :initarg :message :accessor py-exception-message
                :initform ""
-               :documentation "Human-readable message string"))
+               :documentation "Human-readable message string")
+   (%context   :initarg :context  :accessor py-exception-context  :initform nil
+               :documentation "Exception that was active when this was raised (__context__)")
+   (%cause     :initarg :cause    :accessor py-exception-cause    :initform nil
+               :documentation "Explicit cause from 'raise X from Y' (__cause__)")
+   (%suppress  :initarg :suppress :accessor py-exception-suppress :initform nil
+               :documentation "True when 'raise X from None' (__suppress_context__)"))
   (:documentation "Runtime representation of a Python exception instance."))
 
 (defun make-py-exception-object (class-name &optional args)
@@ -2726,6 +2735,14 @@
      (make-py-tuple (or (py-exception-args obj) '())))
     ((string= name "__class__")
      (make-py-type :name (py-exception-class-name obj)))
+    ((string= name "__context__")
+     (or (py-exception-context obj) +py-none+))
+    ((string= name "__cause__")
+     (or (py-exception-cause obj) +py-none+))
+    ((string= name "__suppress_context__")
+     (if (py-exception-suppress obj) +py-true+ +py-false+))
+    ((string= name "__traceback__")
+     +py-none+)
     (t (call-next-method))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
