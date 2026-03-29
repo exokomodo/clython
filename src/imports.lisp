@@ -244,6 +244,23 @@
                         ;; If not a coroutine, just return it (matches CPython behavior for non-coro)
                         (clython.runtime:py-raise "TypeError"
                                                   "asyncio.run() requires a coroutine object")))))
+    ;; asyncio.iscoroutine(obj)
+    (setf (gethash "iscoroutine" d)
+          (clython.runtime:make-py-function
+           :name "iscoroutine"
+           :cl-fn (lambda (obj)
+                    (if (typep obj 'clython.runtime:py-coroutine)
+                        clython.runtime:+py-true+
+                        clython.runtime:+py-false+))))
+    ;; asyncio.iscoroutinefunction(obj)
+    (setf (gethash "iscoroutinefunction" d)
+          (clython.runtime:make-py-function
+           :name "iscoroutinefunction"
+           :cl-fn (lambda (obj)
+                    (if (and (typep obj 'clython.runtime:py-function)
+                             (clython.runtime:py-function-async-p obj))
+                        clython.runtime:+py-true+
+                        clython.runtime:+py-false+))))
     ;; asyncio.sleep(seconds) — in synchronous mode, returns a coroutine that resolves to None
     (setf (gethash "sleep" d)
           (clython.runtime:make-py-function
@@ -473,6 +490,140 @@
                           clython.runtime:+py-false+)))))
     mod))
 
+;;;; ─── itertools module ─────────────────────────────────────────────────────
+
+(defun make-itertools-module ()
+  "Create an itertools module with common functions."
+  (let ((mod (clython.runtime:make-py-module "itertools")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "itertools"))
+    ;; islice(iterable, [start,] stop [, step])
+    (setf (gethash "islice" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "islice"
+           :cl-fn (lambda (&rest args)
+                    (let* ((iterable (first args))
+                           (rest-args (rest args))
+                           (start (if (>= (length rest-args) 2)
+                                      (clython.runtime:py->cl (first rest-args)) 0))
+                           (stop  (if rest-args
+                                      (clython.runtime:py->cl
+                                       (if (>= (length rest-args) 2)
+                                           (second rest-args) (first rest-args)))
+                                      nil))
+                           (step  (if (>= (length rest-args) 3)
+                                      (clython.runtime:py->cl (third rest-args)) 1))
+                           (items (cond
+                                    ((typep iterable 'clython.runtime:py-list)
+                                     (coerce (clython.runtime:py-list-value iterable) 'list))
+                                    ((typep iterable 'clython.runtime:py-tuple)
+                                     (coerce (clython.runtime:py-tuple-value iterable) 'list))
+                                    (t nil)))
+                           (result nil) (i 0))
+                      (dolist (item items)
+                        (when (and (>= i start)
+                                   (or (null stop) (< i stop))
+                                   (zerop (mod (- i start) (max 1 step))))
+                          (push item result))
+                        (incf i))
+                      (clython.runtime:make-py-list (nreverse result))))))
+    ;; chain(*iterables)
+    (setf (gethash "chain" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "chain"
+           :cl-fn (lambda (&rest args)
+                    (let ((result nil))
+                      (dolist (arg args)
+                        (cond
+                          ((typep arg 'clython.runtime:py-list)
+                           (loop for item across (clython.runtime:py-list-value arg)
+                                 do (push item result)))
+                          ((typep arg 'clython.runtime:py-tuple)
+                           (loop for item across (clython.runtime:py-tuple-value arg)
+                                 do (push item result)))))
+                      (clython.runtime:make-py-list (nreverse result))))))
+    ;; count(start=0, step=1) — returns a generator; stub returns a list
+    (setf (gethash "count" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "count"
+           :cl-fn (lambda (&rest args)
+                    (declare (ignore args))
+                    clython.runtime:+py-none+)))
+    ;; repeat(obj, times=None)
+    (setf (gethash "repeat" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "repeat"
+           :cl-fn (lambda (&rest args)
+                    (let* ((obj (first args))
+                           (times (if (second args)
+                                      (clython.runtime:py->cl (second args))
+                                      nil)))
+                      (if times
+                          (clython.runtime:make-py-list
+                           (loop repeat times collect obj))
+                          clython.runtime:+py-none+)))))
+    mod))
+
+;;;; ─── functools module ──────────────────────────────────────────────────────
+
+(defun make-functools-module ()
+  "Create a functools module."
+  (let ((mod (clython.runtime:make-py-module "functools")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "functools"))
+    ;; wraps — identity decorator
+    (setf (gethash "wraps" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "wraps"
+           :cl-fn (lambda (&rest args)
+                    (declare (ignore args))
+                    (clython.runtime:make-py-function
+                     :name "wraps_inner"
+                     :cl-fn (lambda (&rest inner) (first inner))))))
+    ;; lru_cache — identity decorator
+    (setf (gethash "lru_cache" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "lru_cache"
+           :cl-fn (lambda (&rest args)
+                    (if (and args (typep (first args) 'clython.runtime:py-function))
+                        (first args)
+                        (clython.runtime:make-py-function
+                         :name "lru_cache_inner"
+                         :cl-fn (lambda (&rest dargs) (first dargs)))))))
+    ;; reduce(fn, seq[, initial])
+    (setf (gethash "reduce" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "reduce"
+           :cl-fn (lambda (&rest args)
+                    (let* ((fn   (first args))
+                           (seq  (second args))
+                           (init (third args))
+                           (items (cond
+                                    ((typep seq 'clython.runtime:py-list)
+                                     (coerce (clython.runtime:py-list-value seq) 'list))
+                                    ((typep seq 'clython.runtime:py-tuple)
+                                     (coerce (clython.runtime:py-tuple-value seq) 'list))
+                                    (t nil)))
+                           (acc init))
+                      (dolist (item items)
+                        (if acc
+                            (setf acc (clython.runtime:py-call fn acc item))
+                            (setf acc item)))
+                      (or acc clython.runtime:+py-none+)))))
+    ;; partial(fn, *args, **kwargs) — returns a partial application
+    (setf (gethash "partial" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "partial"
+           :cl-fn (lambda (&rest args)
+                    (let ((fn (first args))
+                          (bound-args (rest args)))
+                      (clython.runtime:make-py-function
+                       :name "partial"
+                       :cl-fn (lambda (&rest call-args)
+                                (apply #'clython.runtime:py-call fn
+                                       (append bound-args call-args))))))))
+    mod))
+
 (defun register-builtin-modules ()
   "Register all built-in module stubs."
   (setf (gethash "sys" *builtin-modules*) #'make-sys-module)
@@ -502,7 +653,9 @@
   (setf (gethash "collections" *builtin-modules*) #'make-collections-module)
   (setf (gethash "decimal" *builtin-modules*) #'make-decimal-module)
   (setf (gethash "fractions" *builtin-modules*) #'make-fractions-module)
-  (setf (gethash "keyword" *builtin-modules*) #'make-keyword-module))
+  (setf (gethash "keyword" *builtin-modules*) #'make-keyword-module)
+  (setf (gethash "itertools" *builtin-modules*) #'make-itertools-module)
+  (setf (gethash "functools" *builtin-modules*) #'make-functools-module))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Module finder

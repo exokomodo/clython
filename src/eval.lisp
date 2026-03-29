@@ -440,10 +440,24 @@
                        collect (eval-node a env)))
          (kw-nodes (clython.ast:call-node-keywords node))
          ;; Evaluate keyword arguments into an alist ((name . value) ...)
-         (kwargs (mapcar (lambda (kw)
-                           (cons (clython.ast:keyword-arg kw)
-                                 (eval-node (clython.ast:keyword-value kw) env)))
-                         kw-nodes)))
+         ;; Handle both named kwargs (arg="name") and **dict spread (arg=nil)
+         (kwargs (loop for kw in kw-nodes
+                       if (null (clython.ast:keyword-arg kw))
+                         ;; **dict spread: unpack all key/value pairs
+                         append (let ((src (eval-node (clython.ast:keyword-value kw) env)))
+                                  (when (typep src 'clython.runtime:py-dict)
+                                    (let ((pairs nil))
+                                      (maphash (lambda (k v)
+                                                 (push (cons (if (typep k 'clython.runtime:py-str)
+                                                                 (clython.runtime:py-str-value k)
+                                                                 (format nil "~A" k))
+                                                             v)
+                                                       pairs))
+                                               (clython.runtime:py-dict-value src))
+                                      (nreverse pairs))))
+                       else
+                         collect (cons (clython.ast:keyword-arg kw)
+                                       (eval-node (clython.ast:keyword-value kw) env)))))
     ;; Check if this is a user-defined py-function with AST body (not a cl-fn builtin)
     (if (and (typep func 'clython.runtime:py-function)
              (clython.runtime:py-function-body func)
@@ -1411,7 +1425,13 @@
         (when (and (typep exc 'clython.runtime:py-object)
                    (not (typep exc 'clython.runtime:py-exception-object)))
           (setf exc (%py-object-to-exception exc)))
-        ;; Handle `raise X from Y` — set __cause__
+        ;; Set __context__ if we're raising inside an except handler
+        (when (and *current-exception*
+                   (typep exc 'clython.runtime:py-exception-object))
+          (let ((ctx-val (py-exception-value *current-exception*)))
+            (when (typep ctx-val 'clython.runtime:py-exception-object)
+              (setf (clython.runtime:py-exception-context exc) ctx-val))))
+        ;; Handle `raise X from Y` — set __cause__ and __suppress_context__
         (when (clython.ast:raise-node-cause node)
           (let ((cause (eval-node (clython.ast:raise-node-cause node) env)))
             (when (and (or (typep cause 'clython.runtime:py-function)
@@ -1421,9 +1441,14 @@
             (when (and (typep cause 'clython.runtime:py-object)
                        (not (typep cause 'clython.runtime:py-exception-object)))
               (setf cause (%py-object-to-exception cause)))
-            ;; Store cause on the exception object for __cause__ access
+            ;; Store cause and suppress_context on the exception object
             (when (typep exc 'clython.runtime:py-exception-object)
-              (setf (gethash "__cause__" (clython.runtime:py-object-dict exc)) cause))))
+              (if (eq cause clython.runtime:+py-none+)
+                  ;; raise X from None — suppress context
+                  (setf (clython.runtime:py-exception-suppress exc) t)
+                  (progn
+                    (setf (clython.runtime:py-exception-cause exc) cause)
+                    (setf (clython.runtime:py-exception-suppress exc) t))))))
         (error 'py-exception :value exc))
       ;; bare raise — re-raise current exception if available
       (let ((current *current-exception*))
