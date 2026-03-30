@@ -110,10 +110,16 @@
         (setf e (env-parent e))))
     (clython.runtime:py-raise "NameError" "name '~A' is not defined" name))
   ;; Normal LEGB: search local → parent chain
+  ;; If we find the deleted sentinel in the innermost local frame, raise
+  ;; UnboundLocalError (mirrors CPython's behaviour for `del x; use x`).
   (let ((e env))
     (loop while e do
       (multiple-value-bind (val found) (gethash name (env-bindings e))
-        (when found (return-from env-get val)))
+        (when found
+          (when (eq val clython.runtime:+py-deleted+)
+            (clython.runtime:py-raise "UnboundLocalError"
+              "local variable '~A' referenced before assignment" name))
+          (return-from env-get val)))
       (setf e (env-parent e))))
   ;; Builtin fallback — check the builtins registry directly
   (multiple-value-bind (builtin found) (gethash name clython.builtins:*builtins*)
@@ -165,5 +171,10 @@
       (unless (remhash name (env-bindings root))
         (clython.runtime:py-raise "NameError" "name '~A' is not defined" name))
       (return-from env-del t)))
-  (unless (remhash name (env-bindings env))
-    (clython.runtime:py-raise "NameError" "name '~A' is not defined" name)))
+  ;; For local variables, store the deleted sentinel so that subsequent
+  ;; access raises UnboundLocalError (CPython PEP 3110 behaviour).
+  (multiple-value-bind (val found) (gethash name (env-bindings env))
+    (declare (ignore val))
+    (if found
+        (setf (gethash name (env-bindings env)) clython.runtime:+py-deleted+)
+        (clython.runtime:py-raise "NameError" "name '~A' is not defined" name))))

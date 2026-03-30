@@ -91,7 +91,9 @@
 
    ;; Helpers / internal
    #:py-bool-from-cl
+   #:make-py-bool
    #:py-bool-raw
+   #:+py-deleted+
    #:stop-iteration
 
    ;; Singletons
@@ -240,6 +242,9 @@
 
 (defvar +py-none+ (make-instance 'py-none))
 
+;;; Deleted sentinel — marks locally-deleted variables in env bindings
+(defvar +py-deleted+ (make-instance 'py-object))
+
 ;;; Ellipsis ---------------------------------------------------------------
 (defclass py-ellipsis (py-object) ()
   (:documentation "Python Ellipsis (...)."))
@@ -256,6 +261,10 @@
 
 (defun py-bool-from-cl (x)
   "Return +py-true+ or +py-false+ from a CL generalised boolean."
+  (if x +py-true+ +py-false+))
+
+(defun make-py-bool (x)
+  "Alias for py-bool-from-cl — returns +py-true+ or +py-false+."
   (if x +py-true+ +py-false+))
 
 ;;; int --------------------------------------------------------------------
@@ -2452,6 +2461,8 @@
 (defmethod py-type-of ((obj py-iterator))  "iterator")
 (defmethod py-type-of ((obj py-coroutine)) "coroutine")
 (defmethod py-type-of ((obj py-range))     "range")
+(defmethod py-type-of ((obj py-ellipsis))  "ellipsis")
+(defmethod py-type-of ((obj py-generator)) "generator")
 (defmethod py-type-of ((obj py-object))    (string (class-name (class-of obj))))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
