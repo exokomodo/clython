@@ -11,6 +11,7 @@ Modules covered:
   - functools
   - itertools
   - keyword
+  - re
 """
 
 import os
@@ -106,9 +107,7 @@ class TestStringModule:
 
     @pytest.mark.xfail(strict=False, reason="string.Template not implemented in Clython")
     def test_template_substitute(self):
-        out, _, rc = clython_run(
-            "import string\nprint(string.Template('$x').substitute(x=42))"
-        )
+        out, _, rc = clython_run("import string\nprint(string.Template('$x').substitute(x=42))")
         assert rc == 0
         assert out == "42"
 
@@ -154,18 +153,14 @@ class TestCollectionsModule:
 
     def test_counter_counts_chars(self):
         out, _, rc = clython_run(
-            "import collections\n"
-            "c = collections.Counter('aab')\n"
-            "print(c['a'])"
+            "import collections\n" "c = collections.Counter('aab')\n" "print(c['a'])"
         )
         assert rc == 0
         assert out == "2"
 
     def test_deque_popleft(self):
         out, _, rc = clython_run(
-            "import collections\n"
-            "d = collections.deque([1, 2, 3])\n"
-            "print(d.popleft())"
+            "import collections\n" "d = collections.deque([1, 2, 3])\n" "print(d.popleft())"
         )
         assert rc == 0
         assert out == "1"
@@ -283,8 +278,7 @@ class TestFunctoolsModule:
 
     def test_reduce(self):
         out, _, rc = clython_run(
-            "import functools\n"
-            "print(functools.reduce(lambda a, b: a + b, [1, 2, 3]))"
+            "import functools\n" "print(functools.reduce(lambda a, b: a + b, [1, 2, 3]))"
         )
         assert rc == 0
         assert out == "6"
@@ -319,7 +313,6 @@ class TestFunctoolsModule:
 class TestReModule:
     """Tests for the re stdlib module."""
 
-    @pytest.mark.xfail(strict=False, reason="re.match returns None instead of a match object")
     def test_match_returns_not_none(self):
         out, _, rc = clython_run(
             r"import re" + "\n" + r"print(re.match(r'\d+', '123') is not None)"
@@ -327,7 +320,6 @@ class TestReModule:
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(strict=False, reason="re.sub not implemented or broken in Clython")
     def test_sub_collapses_whitespace(self):
         out, _, rc = clython_run(
             r"import re" + "\n" + r"print(re.sub(r'\s+', ' ', 'hello  world'))"
@@ -335,7 +327,6 @@ class TestReModule:
         assert rc == 0
         assert out == "hello world"
 
-    @pytest.mark.xfail(strict=False, reason="re.compile pattern type not yet implemented")
     def test_compile_returns_pattern(self):
         out, _, rc = clython_run(
             r"import re" + "\n" + r"p = re.compile(r'[a-z]+')" + "\nprint(type(p).__name__)"
@@ -344,7 +335,6 @@ class TestReModule:
         # CPython uses 're.Pattern', but any non-error type name is acceptable
         assert out in ("Pattern", "re.Pattern", "SRE_Pattern")
 
-    @pytest.mark.xfail(strict=False, reason="re.findall not implemented or broken in Clython")
     def test_findall_digits(self):
         out, _, rc = clython_run(
             r"import re" + "\n" + r"print(re.findall(r'\d+', 'abc 12 def 34'))"
@@ -352,7 +342,6 @@ class TestReModule:
         assert rc == 0
         assert out == "['12', '34']"
 
-    @pytest.mark.xfail(strict=False, reason="re.search not implemented or broken in Clython")
     def test_search_finds_inner_match(self):
         out, _, rc = clython_run(
             r"import re" + "\n" + r"print(re.search(r'\d+', 'abc123def') is not None)"
@@ -360,11 +349,8 @@ class TestReModule:
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(strict=False, reason="re.split not implemented or broken in Clython")
     def test_split_on_whitespace(self):
-        out, _, rc = clython_run(
-            r"import re" + "\n" + r"print(re.split(r'\s+', 'a b  c'))"
-        )
+        out, _, rc = clython_run(r"import re" + "\n" + r"print(re.split(r'\s+', 'a b  c'))")
         assert rc == 0
         assert out == "['a', 'b', 'c']"
 
@@ -379,16 +365,14 @@ class TestItertoolsModule:
 
     def test_islice(self):
         out, _, rc = clython_run(
-            "import itertools\n"
-            "print(list(itertools.islice([1, 2, 3, 4, 5], 2, 4)))"
+            "import itertools\n" "print(list(itertools.islice([1, 2, 3, 4, 5], 2, 4)))"
         )
         assert rc == 0
         assert out == "[3, 4]"
 
     def test_chain(self):
         out, _, rc = clython_run(
-            "import itertools\n"
-            "print(list(itertools.chain([1, 2], [3, 4])))"
+            "import itertools\n" "print(list(itertools.chain([1, 2], [3, 4])))"
         )
         assert rc == 0
         assert out == "[1, 2, 3, 4]"
