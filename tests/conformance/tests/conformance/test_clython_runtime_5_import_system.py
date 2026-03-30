@@ -78,7 +78,6 @@ def test_from_dotted_import():
     assert out == "True"
 
 
-@pytest.mark.xfail(reason="Clython json module may not be implemented")
 def test_import_json():
     source = """
 import json
