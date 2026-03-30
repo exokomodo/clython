@@ -212,6 +212,12 @@
                               do (write-char (ls-advance ls) p))))
          (ch          (ls-char ls)))
 
+    ;; Validate prefix — f and b cannot be combined (fb or bf are invalid)
+    (let ((lp (string-downcase prefix)))
+      (when (and (find #\f lp) (find #\b lp))
+        (error 'lexer-error :message "SyntaxError: cannot combine 'f' prefix with 'b' prefix"
+               :line save-line :column save-col)))
+
     ;; Determine quote style
     (unless (and ch (or (char= ch #\') (char= ch #\")))
       (error 'lexer-error :message "Expected quote character"

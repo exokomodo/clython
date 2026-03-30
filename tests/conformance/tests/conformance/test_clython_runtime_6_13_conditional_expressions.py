@@ -249,7 +249,6 @@ def test_conditional_lambda():
     assert out == "even odd"
 
 
-@pytest.mark.xfail(reason="Missing else clause may produce different error in Clython")
 def test_conditional_missing_else_raises():
     """Missing else clause should produce a SyntaxError."""
     source = "x = 1 if True"

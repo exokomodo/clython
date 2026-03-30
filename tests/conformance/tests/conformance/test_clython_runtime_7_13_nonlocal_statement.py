@@ -243,7 +243,7 @@ class TestNonlocalStatementRuntime:
         assert rc == 0
         assert out == "changed_enc\nchanged_module"
 
-    @pytest.mark.xfail(reason="Clython does not raise SyntaxError for nonlocal referencing undefined enclosing variable")
+    @pytest.mark.xfail(reason="Clython validates nonlocal at runtime, not compile-time")
     def test_nonlocal_undefined_enclosing_raises(self):
         """nonlocal referencing undefined enclosing variable is a SyntaxError"""
         out, err, rc = clython_run(

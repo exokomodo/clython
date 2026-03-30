@@ -101,7 +101,6 @@ print(s)
     assert out == '{"a": 1, "b": 2}'
 
 
-@pytest.mark.xfail(reason="Clython collections module may not be implemented")
 def test_import_collections():
     source = """
 from collections import defaultdict
@@ -153,7 +152,6 @@ print(has_sys)
     assert out == "True"
 
 
-@pytest.mark.xfail(reason="Clython sys.modules may not track all imported modules")
 def test_import_module_in_sys_modules():
     source = """
 import sys
@@ -235,7 +233,6 @@ print(math.__name__)
     assert out == "math"
 
 
-@pytest.mark.xfail(reason="Clython re module may not be implemented")
 def test_import_re():
     source = """
 import re

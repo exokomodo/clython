@@ -773,6 +773,14 @@
                                :keys (nreverse keys) :values (nreverse vals)
                                :line line :col col)))
                 (progn (ps-restore ps saved) (return-from nil +fail+)))))))
+    ;; Check for {*expr, ...} set starting with star unpacking
+    (let ((star-tok2 (ps-token ps)))
+      (when (and star-tok2 (eq (tok-type star-tok2) :op)
+                 (string= (tok-value star-tok2) "*"))
+        (let ((starred-first (parse-star-expr ps)))
+          (unless (failp starred-first)
+            (return-from nil
+              (parse-set-after-first ps saved starred-first line col))))))
     ;; First expression
     (let ((first-expr (parse-expression-internal ps)))
       (when (failp first-expr)
@@ -1492,7 +1500,7 @@
               (let ((else-tok (ps-token ps)))
                 (unless (and else-tok (eq (tok-type else-tok) :keyword)
                              (string= (tok-value else-tok) "else"))
-                  (return-from nil body))
+                  (error "SyntaxError: expected 'else' after conditional expression"))
                 (ps-advance ps)
                 (let ((orelse (parse-expression-internal ps)))
                   (if (failp orelse) body

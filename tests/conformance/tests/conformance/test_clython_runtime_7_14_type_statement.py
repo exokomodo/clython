@@ -36,7 +36,6 @@ _TYPE_STMT_XFAIL = pytest.mark.xfail(
 
 # ── 7.14.1 Simple type aliases ────────────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementSimpleAliases:
     """Concept 1 – simple non-generic type aliases."""
 
@@ -56,6 +55,7 @@ class TestTypeStatementSimpleAliases:
         out, err, rc = clython_run("type StringDict = dict[str, str]\nprint(StringDict)")
         assert rc == 0
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_union_alias(self):
         out, err, rc = clython_run("type OptStr = str | None\nprint(OptStr)")
         assert rc == 0
@@ -63,7 +63,6 @@ class TestTypeStatementSimpleAliases:
 
 # ── 7.14.2 Generic type aliases ───────────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementGenericAliases:
     """Concept 2 – generic type aliases with type parameters."""
 
@@ -75,6 +74,7 @@ class TestTypeStatementGenericAliases:
         out, err, rc = clython_run("type Mapping[K, V] = dict[K, V]\nprint(Mapping)")
         assert rc == 0
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_result_union_param(self):
         out, err, rc = clython_run("type Result[T, E] = T | E\nprint(Result)")
         assert rc == 0
@@ -86,16 +86,17 @@ class TestTypeStatementGenericAliases:
 
 # ── 7.14.3 Complex type expressions ──────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementComplexExpressions:
     """Concept 3 – complex / nested type expressions inside type aliases."""
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_nested_generic(self):
         out, err, rc = clython_run(
             "type Config = dict[str, str | int | bool | list[str]]\nprint(Config)"
         )
         assert rc == 0
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_optional_callable(self):
         out, err, rc = clython_run(
             "type Handler[T] = callable[[T], None] | None\nprint(Handler)"
@@ -105,7 +106,6 @@ class TestTypeStatementComplexExpressions:
 
 # ── 7.14.4 TypeVar parameters ────────────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementTypeVarParams:
     """Concept 4 – TypeVar-style type parameters in type statements."""
 
@@ -122,7 +122,6 @@ class TestTypeStatementTypeVarParams:
 
 # ── 7.14.5 Constrained type parameters ───────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementConstrainedParams:
     """Concept 5 – constrained type parameters (T: (int, float) syntax)."""
 
@@ -135,7 +134,6 @@ class TestTypeStatementConstrainedParams:
 
 # ── 7.14.6 Type parameter bounds ─────────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementParamBounds:
     """Concept 6 – type parameter with upper-bound annotation (T: SomeType)."""
 
@@ -145,6 +143,7 @@ class TestTypeStatementParamBounds:
         )
         assert rc == 0
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_iterable_alias(self):
         out, err, rc = clython_run(
             "type Iterable[T] = list[T] | tuple[T, ...] | set[T]\nprint(Iterable)"
@@ -154,7 +153,6 @@ class TestTypeStatementParamBounds:
 
 # ── 7.14.7 Module-level type aliases ─────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementModuleLevel:
     """Concept 7 – type aliases defined at module (top) level."""
 
@@ -181,7 +179,6 @@ class TestTypeStatementModuleLevel:
 
 # ── 7.14.8 Class-level type aliases ──────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementClassLevel:
     """Concept 8 – type aliases defined inside a class body."""
 
@@ -210,7 +207,6 @@ class TestTypeStatementClassLevel:
 
 # ── 7.14.9 Function-level type aliases ───────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementFunctionLevel:
     """Concept 9 – type aliases defined inside a function."""
 
@@ -239,7 +235,6 @@ class TestTypeStatementFunctionLevel:
 
 # ── 7.14.10 Type alias scoping ────────────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementScoping:
     """Concept 10 – scoping rules for type aliases at different levels."""
 
@@ -269,7 +264,6 @@ class TestTypeStatementScoping:
 
 # ── 7.14.11 Forward references ────────────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementForwardReferences:
     """Concept 11 – forward references in type alias values."""
 
@@ -300,10 +294,10 @@ class TestTypeStatementForwardReferences:
 
 # ── 7.14.12 Recursive type aliases ───────────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementRecursiveAliases:
     """Concept 12 – self-referential / recursive type alias definitions."""
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_json_value(self):
         out, err, rc = clython_run(
             "type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]\n"
@@ -311,6 +305,7 @@ class TestTypeStatementRecursiveAliases:
         )
         assert rc == 0
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_recursive_generic(self):
         out, err, rc = clython_run(
             "type Tree[T] = T | dict[str, Tree[T]]\n"
@@ -321,7 +316,6 @@ class TestTypeStatementRecursiveAliases:
 
 # ── 7.14.13 TypeAlias AST node structure ─────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementASTStructure:
     """Concept 13 – type statement produces a value / object accessible at runtime."""
 
@@ -344,7 +338,6 @@ class TestTypeStatementASTStructure:
 
 # ── 7.14.14 Type parameter AST structure ─────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementParamASTStructure:
     """Concept 14 – type parameter objects are accessible on the alias."""
 
@@ -358,7 +351,6 @@ class TestTypeStatementParamASTStructure:
 
 # ── 7.14.15 Cross-implementation consistency ─────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementCrossImplConsistency:
     """Concept 15 – basic type aliases that must be consistent across implementations."""
 
@@ -366,6 +358,7 @@ class TestTypeStatementCrossImplConsistency:
         out, err, rc = clython_run("type IntAlias = int\nprint(IntAlias)")
         assert rc == 0
 
+    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_union_alias_bound(self):
         out, err, rc = clython_run("type UnionAlias = int | str\nprint(UnionAlias)")
         assert rc == 0
@@ -377,7 +370,6 @@ class TestTypeStatementCrossImplConsistency:
 
 # ── 7.14.16 Comprehensive real-world type patterns ────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementComprehensivePatterns:
     """Concept 16 – real-world-style collections of type aliases."""
 
@@ -392,6 +384,7 @@ class TestTypeStatementComprehensivePatterns:
         assert rc == 0
         assert out == "ok"
 
+    @pytest.mark.xfail(reason="Not yet supported in Clython")
     def test_generic_container_types(self):
         out, err, rc = clython_run(
             "type Container[T] = list[T] | tuple[T, ...] | set[T]\n"
@@ -415,7 +408,6 @@ class TestTypeStatementComprehensivePatterns:
 
 # ── 7.14.17 Type alias used in annotation ────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementUsedInAnnotations:
     """Concept 17 – type alias used as a type annotation on variables and parameters."""
 
@@ -451,10 +443,10 @@ class TestTypeStatementUsedInAnnotations:
 
 # ── 7.14.18 Introspection capabilities ───────────────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementIntrospection:
     """Concept 18 – ability to introspect / enumerate type aliases at runtime."""
 
+    @pytest.mark.xfail(reason="Not yet supported in Clython")
     def test_alias_in_namespace(self):
         out, err, rc = clython_run(
             "type MyAlias = int\n"
@@ -475,7 +467,6 @@ class TestTypeStatementIntrospection:
 
 # ── 7.14.19 Fallback / Python < 3.12 behaviour ───────────────────────────
 
-@_TYPE_STMT_XFAIL
 class TestTypeStatementSyntaxIsRecognised:
     """Concept 19 – Clython parses the type statement without hard SyntaxError."""
 

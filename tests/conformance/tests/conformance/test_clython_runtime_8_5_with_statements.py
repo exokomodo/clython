@@ -346,7 +346,6 @@ class TestWithEdgeCases:
         )
         assert rc == 0 and out == "42"
 
-    @pytest.mark.xfail(reason="exc_type identity check (exc_type is ValueError) not working correctly in Clython __exit__")
     def test_with_exit_sees_correct_exception_type(self):
         out, _, rc = clython_run(
             "class CM:\n"

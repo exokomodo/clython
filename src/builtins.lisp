@@ -85,9 +85,18 @@
   "Exhaust a Python iterable and return a CL list of py-objects."
   (let ((it (py-iter iterable))
         (result '()))
-    (handler-case
-        (loop (push (py-next it) result))
-      (stop-iteration () (nreverse result)))))
+    (block done
+      (handler-bind
+          ;; CL stop-iteration condition (built-in iterators)
+          ((stop-iteration (lambda (c) (declare (ignore c)) (return-from done (nreverse result))))
+           ;; Python StopIteration raised from user-defined __next__
+           (py-exception
+            (lambda (c)
+              (let ((v (py-exception-value c)))
+                (when (and (typep v 'py-exception-object)
+                           (string= (py-exception-class-name v) "StopIteration"))
+                  (return-from done (nreverse result)))))))
+        (loop (push (py-next it) result))))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; print
@@ -442,6 +451,23 @@
       (clython.runtime:py-raise "ValueError" "max() arg is an empty sequence"))
     (reduce (lambda (a b) (if (py-gt a b) a b)) items)))
 
+(defbuiltin +builtin-divmod+ "divmod" (a b)
+  ;; Check for user-defined __divmod__ first
+  (let ((fn (%lookup-dunder a "__divmod__")))
+    (if fn
+        (py-call fn a b)
+        ;; Fallback: integer / float divmod
+        (let ((av (py->cl a))
+              (bv (py->cl b)))
+          (when (zerop bv) (py-raise "ZeroDivisionError" "integer division or modulo by zero"))
+          (multiple-value-bind (q r) (floor av bv)
+            (make-py-tuple (list (if (and (integerp q) (integerp av) (integerp bv))
+                                     (make-py-int q)
+                                     (make-py-float (coerce q 'double-float)))
+                                 (if (and (integerp r) (integerp av) (integerp bv))
+                                     (make-py-int r)
+                                     (make-py-float (coerce r 'double-float))))))))))
+
 (defbuiltin +builtin-pow+ "pow" (&rest args)
   (let ((base (first args))
         (exp  (second args))
@@ -714,6 +740,7 @@
                (cons "max"          +builtin-max+)
                (cons "sum"          +builtin-sum+)
                (cons "pow"          +builtin-pow+)
+               (cons "divmod"       +builtin-divmod+)
                (cons "id"           +builtin-id+)
                (cons "hash"         +builtin-hash+)
                (cons "callable"     +builtin-callable+)

@@ -173,7 +173,6 @@ print(result)
     assert out == "{'a': 1, 'b': 2, 'c': 3}"
 
 
-@pytest.mark.xfail(reason="Clython starred set unpacking may not be implemented")
 def test_starred_merge_sets():
     out, err, rc = clython_run("s1 = {1, 2}; s2 = {3, 4}; print(sorted({*s1, *s2}))")
     assert rc == 0

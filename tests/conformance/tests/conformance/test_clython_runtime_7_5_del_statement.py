@@ -165,7 +165,6 @@ class TestDelStatementRuntime:
         assert rc == 0
         assert out == "both gone"
 
-    @pytest.mark.xfail(reason="del with step slices not correctly implemented in Clython")
     def test_del_step_slice(self):
         """del with step slice removes every other element"""
         out, err, rc = clython_run(

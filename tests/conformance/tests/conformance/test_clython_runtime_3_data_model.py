@@ -177,7 +177,6 @@ with CM() as c:
     assert out == "enter\ninside\nexit"
 
 
-@pytest.mark.xfail(reason="Clython custom __iter__/__next__ may not be fully implemented")
 def test_iterator_protocol():
     source = """
 class Counter:
@@ -207,7 +206,6 @@ print(bool(Falsy()))
     assert out == "True\nFalse"
 
 
-@pytest.mark.xfail(reason="Clython custom __hash__ for dict lookup may not be implemented")
 def test_hash_protocol():
     source = """
 class Hashable:

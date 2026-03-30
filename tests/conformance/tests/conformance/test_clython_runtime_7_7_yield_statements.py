@@ -172,7 +172,6 @@ def test_generator_range_replacement():
     assert out == "[0, 1, 2, 3, 4]"
 
 
-@pytest.mark.xfail(reason="itertools.islice not yet available in Clython")
 def test_generator_fibonacci():
     """Fibonacci generator"""
     out, err, rc = clython_run(

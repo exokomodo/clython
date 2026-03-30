@@ -195,7 +195,6 @@ print(99 in b)
     assert out == "True\nFalse"
 
 
-@pytest.mark.xfail(reason="Clython custom __iter__/__next__ may not be fully implemented")
 def test_iter_next():
     source = """
 class Range:
@@ -263,7 +262,6 @@ with Resource() as r:
     assert out == "acquired\nresource\nreleased"
 
 
-@pytest.mark.xfail(reason="Clython custom __hash__ for dict lookup may not be implemented")
 def test_hash_method():
     source = """
 class Key:
@@ -340,7 +338,6 @@ print(format(t, ''))
     assert out == "98.6C\n98.6"
 
 
-@pytest.mark.xfail(reason="Clython __divmod__ dispatch may not be implemented")
 def test_divmod_method():
     source = """
 class N:

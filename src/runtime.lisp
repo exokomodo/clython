@@ -94,6 +94,8 @@
    #:make-py-bool
    #:py-bool-raw
    #:+py-deleted+
+   #:py-exception
+   #:py-exception-value
    #:stop-iteration
 
    ;; Singletons
@@ -244,6 +246,26 @@
 
 ;;; Deleted sentinel — marks locally-deleted variables in env bindings
 (defvar +py-deleted+ (make-instance 'py-object))
+
+;;; Python exception condition — defined here so builtins.lisp can catch it
+;;; without a circular dependency on eval.lisp.
+(define-condition py-exception (error)
+  ((value :initarg :value :reader py-exception-value :initform nil))
+  (:report (lambda (c stream)
+             ;; NOTE: py-exception-object and its accessors are defined later in
+             ;; this file, but the :report lambda runs at runtime, not compile-time.
+             (let ((v (py-exception-value c)))
+               (cond
+                 ((typep v 'py-exception-object)
+                  (let ((name (py-exception-class-name v))
+                        (msg  (py-exception-message v)))
+                    (if (string= msg "")
+                        (format stream "~A" name)
+                        (format stream "~A: ~A" name msg))))
+                 ((typep v 'py-object)
+                  (format stream "~A" (py-str-of v)))
+                 (t (format stream "~A" v))))))
+  (:documentation "Signalled by `raise` — wraps a Python exception object."))
 
 ;;; Ellipsis ---------------------------------------------------------------
 (defclass py-ellipsis (py-object) ()
@@ -664,7 +686,23 @@
 ;;; Dunder method dispatch helper -------------------------------------------
 
 (defun %lookup-dunder (obj name)
-  "Look up a dunder method NAME in OBJ's class hierarchy. Returns the function or NIL."
+  "Look up a dunder method NAME in OBJ's instance dict or class hierarchy. Returns the function or NIL."
+  ;; Check instance dict first (for per-instance overrides like our built-in
+  ;; module objects: defaultdict, ChainMap, StringIO, etc.)
+  ;; Instance-dict dunders are pre-bound closures (no `self` parameter), so we
+  ;; wrap them to skip the implicit first `self` argument that callers pass.
+  (let ((idict (py-object-dict obj)))
+    (when idict
+      (multiple-value-bind (fn found) (gethash name idict)
+        (when (and found (typep fn 'py-function))
+          (let ((cl-fn (py-function-cl-fn fn)))
+            (return-from %lookup-dunder
+              (make-py-function
+               :name name
+               :cl-fn (lambda (&rest args)
+                        ;; Drop the first arg (self) that py-getitem/py-setitem/etc passes
+                        (apply cl-fn (rest args))))))))))
+  ;; Then class hierarchy
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (fn found) (%lookup-in-class-hierarchy cls name)
       (when found fn))))
@@ -2119,19 +2157,26 @@
           (setf (slot-value obj '%value) new-vec))))))
 
 (defmethod py-delitem ((obj py-list) (key py-slice))
-  "Delete a slice from a list: del x[start:stop]."
+  "Delete a slice from a list: del x[start:stop:step]."
   (let* ((vec (py-list-value obj))
          (len (length vec)))
     (multiple-value-bind (start stop step) (compute-slice-indices key len)
-      (declare (ignore step))
-      (let* ((before (loop for i from 0 below start collect (aref vec i)))
-             (after  (loop for i from stop below len collect (aref vec i)))
-             (all    (append before after))
-             (new-vec (make-array (length all)
-                                  :fill-pointer (length all)
-                                  :adjustable t
-                                  :initial-contents all)))
-        (setf (slot-value obj '%value) new-vec)))))
+      ;; Collect indices to delete into a set
+      (let ((to-delete (make-hash-table)))
+        (if (> step 0)
+            (loop for i from start below stop by step
+                  do (setf (gethash i to-delete) t))
+            (loop for i from start above stop by (- step)
+                  do (setf (gethash i to-delete) t)))
+        ;; Rebuild without the deleted indices
+        (let* ((kept (loop for i from 0 below len
+                           unless (gethash i to-delete)
+                           collect (aref vec i)))
+               (new-vec (make-array (length kept)
+                                    :fill-pointer (length kept)
+                                    :adjustable t
+                                    :initial-contents kept)))
+          (setf (slot-value obj '%value) new-vec))))))
 
 (defmethod py-getitem ((obj py-tuple) (key py-int))
   (let* ((vec (py-tuple-value obj))
@@ -2172,8 +2217,80 @@
     (py-bool  (py-bool-raw key))
     (t        (if (eq key +py-none+) :none key))))
 
+(defun %user-hash (key)
+  "Compute a hash for KEY using __hash__ if defined, else use sxhash."
+  (let ((fn (%lookup-dunder key "__hash__")))
+    (if fn
+        (let ((h (py-call fn key)))
+          (if (typep h 'py-int) (py-int-value h) (sxhash key)))
+        (sxhash key))))
+
+(defun %user-equal (a b)
+  "Compare A and B using __eq__ if defined on A, else use eq."
+  (let ((fn (%lookup-dunder a "__eq__")))
+    (if fn
+        (let ((r (py-call fn a b)))
+          (py-bool-val r))
+        (eq a b))))
+
+(defun %is-primitive-key-p (key)
+  "T if KEY is a primitive Python type that uses direct hash-table lookup."
+  (typep key '(or py-str py-int py-float py-bool py-none py-tuple py-bytes)))
+
+(defun %dict-find (ht key)
+  "Find KEY in HT, using Python __hash__/__eq__ for user objects.
+   Returns (values value found-p raw-ht-key)."
+  (let ((hk (dict-hash-key key)))
+    (if (or (not (typep key 'py-object)) (%is-primitive-key-p key))
+        ;; Primitive key — direct EQUAL lookup
+        (multiple-value-bind (val found) (gethash hk ht)
+          (values val found hk))
+        ;; User-defined object: bucket by __hash__, compare with __eq__
+        (let* ((h (%user-hash key))
+               (bucket-key (cons :py-obj h))
+               (bucket (gethash bucket-key ht)))
+          (when bucket
+            (loop for (k . v) in bucket
+                  when (%user-equal key k)
+                  do (return-from %dict-find (values v t (cons :py-entry k)))))
+          (values nil nil nil)))))
+
+(defun %dict-set (ht key value)
+  "Set KEY → VALUE in HT, respecting __hash__/__eq__."
+  (let ((hk (dict-hash-key key)))
+    (if (and (typep key 'py-object)
+             (not (typep key '(or py-str py-int py-float py-bool py-none))))
+        (let* ((h (%user-hash key))
+               (bucket-key (cons :py-obj h))
+               (bucket (gethash bucket-key ht)))
+          ;; Update existing entry if equal key found
+          (when bucket
+            (loop for pair in bucket
+                  when (%user-equal key (car pair))
+                  do (setf (cdr pair) value)
+                     (return-from %dict-set value)))
+          ;; Append new entry to bucket
+          (setf (gethash bucket-key ht)
+                (cons (cons key value) (or bucket nil))))
+        ;; Primitive key
+        (setf (gethash hk ht) value))))
+
+(defun %dict-del (ht key)
+  "Remove KEY from HT. Returns T if found, NIL otherwise."
+  (let ((hk (dict-hash-key key)))
+    (if (and (typep key 'py-object)
+             (not (typep key '(or py-str py-int py-float py-bool py-none))))
+        (let* ((h (%user-hash key))
+               (bucket-key (cons :py-obj h))
+               (bucket (gethash bucket-key ht))
+               (new-bucket (remove-if (lambda (pair) (%user-equal key (car pair))) bucket)))
+          (if (= (length bucket) (length new-bucket))
+              nil
+              (progn (setf (gethash bucket-key ht) new-bucket) t)))
+        (remhash hk ht))))
+
 (defmethod py-getitem ((obj py-dict) key)
-  (multiple-value-bind (val found) (gethash (dict-hash-key key) (py-dict-value obj))
+  (multiple-value-bind (val found) (%dict-find (py-dict-value obj) key)
     (unless found
       (py-raise "KeyError" "~A" (py-repr key)))
     val))
@@ -2181,13 +2298,13 @@
 (defun py-getitem-or-nil (dict key)
   "Return the value for KEY in DICT, or NIL if not found. Does not raise."
   (when (typep dict 'py-dict)
-    (gethash (dict-hash-key key) (py-dict-value dict))))
+    (nth-value 0 (%dict-find (py-dict-value dict) key))))
 
 (defmethod py-setitem ((obj py-dict) key value)
-  (setf (gethash (dict-hash-key key) (py-dict-value obj)) value))
+  (%dict-set (py-dict-value obj) key value))
 
 (defmethod py-delitem ((obj py-dict) key)
-  (unless (remhash (dict-hash-key key) (py-dict-value obj))
+  (unless (%dict-del (py-dict-value obj) key)
     (py-raise "KeyError" "~A" (py-repr key))))
 
 (defmethod py-delitem ((obj py-object) key)

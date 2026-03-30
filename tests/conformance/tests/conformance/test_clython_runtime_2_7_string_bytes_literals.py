@@ -92,7 +92,6 @@ def test_adjacent_string_concatenation():
     assert out == "hello world"
 
 
-@pytest.mark.xfail(reason="Clython prints bytes without repr prefix (no 'b' prefix in output)")
 def test_adjacent_bytes_concatenation():
     """Adjacent bytes literals are concatenated."""
     out, err, rc = clython_run("print(b'hello' b' ' b'world')")
@@ -142,7 +141,6 @@ def test_fstring_format_specifier():
     assert out == "0042"
 
 
-@pytest.mark.xfail(reason="Clython does not reject invalid fb prefix combination")
 def test_invalid_prefix_combination_fb():
     """f and b prefixes cannot be combined."""
     _, _, rc = clython_run("print(fb'hello')")
