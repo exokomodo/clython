@@ -296,3 +296,317 @@ print(a @ b)
     out, err, rc = clython_run(source)
     assert rc == 0
     assert out == "matmul"
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_simple_name_tokens():
+    """Test simple identifier NAME tokens."""
+    out, err, rc = clython_run("name = 'hello'\nprint(name)")
+    assert rc == 0
+    assert out == "hello"
+
+
+def test_name_token_patterns():
+    """Test various identifier patterns generate NAME tokens."""
+    source = "_x = 1\nmy_var = 2\nCamelCase = 3\nprint(_x + my_var + CamelCase)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "6"
+
+
+def test_name_token_unicode():
+    """Test Unicode identifier NAME tokens."""
+    out, err, rc = clython_run("café = 42\nprint(café)")
+    assert rc == 0
+    assert out == "42"
+
+
+def test_keyword_vs_name_tokens():
+    """Test keyword recognition vs NAME token generation."""
+    out, err, rc = clython_run("if True:\n    print('keyword')")
+    assert rc == 0
+    assert out == "keyword"
+
+
+def test_integer_number_tokens():
+    """Test integer literal NUMBER tokens."""
+    source = "print(42)\nprint(0b1010)\nprint(0o17)\nprint(0xFF)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42\n10\n15\n255"
+
+
+def test_float_number_tokens():
+    """Test floating-point NUMBER tokens."""
+    source = "print(3.14)\nprint(.5)\nprint(5.)\nprint(1e3)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3.14\n0.5\n5.0\n1000.0"
+
+
+def test_complex_number_tokens():
+    """Test complex number literal tokens."""
+    source = "print(1j)\nprint(2.5j)\nprint(type(1j).__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1j\n2.5j\ncomplex"
+
+
+def test_number_token_separators():
+    """Test underscore separators in NUMBER tokens."""
+    source = "print(1_000_000)\nprint(0xFF_AA)\nprint(1_0.0_5)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1000000\n65450\n10.05"
+
+
+def test_longest_match_with_numbers():
+    """Test longest match for numeric literals."""
+    out, err, rc = clython_run("print(1234567890)")
+    assert rc == 0
+    assert out == "1234567890"
+
+
+def test_simple_string_tokens():
+    """Test simple string literal STRING tokens."""
+    source = "print('hello')\nprint(\"world\")"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "hello\nworld"
+
+
+def test_string_token_prefixes():
+    """Test string prefix variations in STRING tokens."""
+    source = "print(b'bytes')\nprint(r'raw')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "b'bytes'\nraw"
+
+
+def test_bytes_literal_tokens():
+    """Test bytes literal tokenization."""
+    source = "x = b'hello'\nprint(type(x).__name__)\nprint(len(x))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "bytes\n5"
+
+
+def test_fstring_token_prefixes():
+    """Test f-string prefix variations."""
+    source = "name = 'world'\nprint(f'hello {name}')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "hello world"
+
+
+def test_multiline_string_tokens():
+    """Test multiline string tokenization."""
+    source = 'x = """line1\nline2\nline3"""\nprint(x)'
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "line1\nline2\nline3"
+
+
+def test_longest_match_with_strings():
+    """Test longest match for string literals."""
+    out, err, rc = clython_run("print('hello world')")
+    assert rc == 0
+    assert out == "hello world"
+
+
+def test_arithmetic_operator_tokens():
+    """Test arithmetic operator OP tokens."""
+    source = "print(2 + 3)\nprint(10 - 4)\nprint(3 * 4)\nprint(10 / 4)\nprint(10 // 3)\nprint(10 % 3)\nprint(2 ** 8)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "5\n6\n12\n2.5\n3\n1\n256"
+
+
+def test_comparison_operator_tokens():
+    """Test comparison operator OP tokens."""
+    source = "print(1 < 2)\nprint(2 > 1)\nprint(1 == 1)\nprint(1 != 2)\nprint(2 >= 2)\nprint(1 <= 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue\nTrue\nTrue\nTrue\nTrue"
+
+
+def test_bitwise_operator_tokens():
+    """Test bitwise operator OP tokens."""
+    source = "print(0b1010 | 0b0101)\nprint(0b1010 & 0b1100)\nprint(0b1010 ^ 0b1100)\nprint(~0)\nprint(1 << 4)\nprint(16 >> 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "15\n8\n6\n-1\n16\n4"
+
+
+def test_assignment_operator_tokens():
+    """Test assignment operator OP tokens."""
+    source = "x = 10\nx += 5\nprint(x)\nx -= 3\nprint(x)\nx *= 2\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "15\n12\n24"
+
+
+def test_delimiter_tokens():
+    """Test delimiter OP tokens."""
+    source = "t = (1, 2, 3)\nprint(t[0])\nd = {'k': 'v'}\nprint(d['k'])"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1\nv"
+
+
+def test_matrix_multiplication_token():
+    """Test matrix multiplication operator token."""
+    source = "class M:\n    def __matmul__(self, o): return 'mm'\na = M()\nprint(a @ a)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "mm"
+
+
+def test_longest_operator_matching():
+    """Test longest match rule for operators."""
+    source = "x = 5\nx += 3\nprint(x)\ny = 10\ny //= 3\nprint(y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "8\n3"
+
+
+def test_longest_match_disambiguation():
+    """Test longest match rule disambiguation."""
+    source = "print(1 == 1)\nprint(1 != 2)\nprint(2 >= 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue\nTrue"
+
+
+def test_newline_token_generation():
+    """Test NEWLINE tokens generated for logical line boundaries."""
+    source = "x = 1\ny = 2\nprint(x + y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_newline_statement_boundaries():
+    """Test NEWLINE tokens create statement boundaries."""
+    source = "a = 1\nb = 2\nc = a + b\nprint(c)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_newline_in_compound_statements():
+    """Test NEWLINE behavior in compound statements."""
+    source = "def f():\n    x = 1\n    y = 2\n    return x + y\nprint(f())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_implicit_newline_at_eof():
+    """Test implicit NEWLINE at end of file."""
+    out, err, rc = clython_run("print('eof')")
+    assert rc == 0
+    assert out == "eof"
+
+
+def test_indent_token_generation():
+    """Test INDENT tokens for indentation increases."""
+    source = "if True:\n    print('indented')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "indented"
+
+
+def test_dedent_token_generation():
+    """Test DEDENT tokens for indentation decreases."""
+    source = "def f():\n    x = 1\nx = 2\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "2"
+
+
+def test_indent_dedent_matching():
+    """Test INDENT/DEDENT token matching requirements."""
+    source = "if True:\n    x = 1\n    y = 2\nprint(x + y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_nested_indent_dedent():
+    """Test nested INDENT/DEDENT token patterns."""
+    source = "if True:\n    if True:\n        x = 42\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_whitespace_ignored_between_tokens():
+    """Test whitespace is ignored between tokens."""
+    source = "x   =   1   +   2\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_whitespace_token_separation():
+    """Test whitespace required for token separation."""
+    source = "x = 10\ny = 20\nprint(x + y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "30"
+
+
+def test_significant_whitespace_preservation():
+    """Test significant whitespace in indentation."""
+    source = "def f():\n    return 7\nprint(f())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "7"
+
+
+def test_automatic_token_boundaries():
+    """Test automatic token boundary detection."""
+    source = "x=1+2*3\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "7"
+
+
+def test_token_boundary_with_numbers():
+    """Test token boundaries with numeric literals."""
+    out, err, rc = clython_run("print(1+2)")
+    assert rc == 0
+    assert out == "3"
+
+
+def test_token_boundary_ambiguity_resolution():
+    """Test resolution of token boundary ambiguities."""
+    out, err, rc = clython_run("x = -1\nprint(x)")
+    assert rc == 0
+    assert out == "-1"
+
+
+def test_token_edge_cases():
+    """Test edge cases in tokenization."""
+    source = "x = 0\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "0"
+
+
+def test_tokenization_specification_compliance():
+    """Test compliance with tokenization specifications."""
+    source = "x = 1_000\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1000"
+
+
+def test_comprehensive_token_patterns():
+    """Test complex token combinations."""
+    source = "result = (1 + 2) * 3 - 4 // 2\nprint(result)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "7"

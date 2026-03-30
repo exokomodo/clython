@@ -293,3 +293,248 @@ def test_incomplete_operator_is_error():
 def test_mismatched_brackets_is_error():
     _, _, rc = clython_run("print([1, 2, 3)")
     assert rc != 0
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_basic_arithmetic_operators():
+    """Test basic arithmetic operators."""
+    source = "print(1 + 2)\nprint(5 - 3)\nprint(2 * 4)\nprint(10 / 4)\nprint(10 // 3)\nprint(10 % 3)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\n2\n8\n2.5\n3\n1"
+
+
+def test_unary_arithmetic_operators():
+    """Test unary arithmetic operators."""
+    source = "x = 5\nprint(-x)\nprint(+x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "-5\n5"
+
+
+def test_comparison_operators():
+    """Test comparison operators."""
+    source = "print(1 < 2)\nprint(2 > 1)\nprint(1 == 1)\nprint(1 != 2)\nprint(2 >= 2)\nprint(1 <= 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue\nTrue\nTrue\nTrue\nTrue"
+
+
+def test_logical_binary_operators():
+    """Test logical binary operators."""
+    source = "print(True and False)\nprint(True or False)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "False\nTrue"
+
+
+def test_logical_unary_operator():
+    """Test logical unary operator."""
+    source = "print(not True)\nprint(not False)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "False\nTrue"
+
+
+def test_bitwise_binary_operators():
+    """Test bitwise binary operators."""
+    source = "print(0b1010 | 0b0101)\nprint(0b1010 & 0b1100)\nprint(0b1010 ^ 0b1100)\nprint(1 << 4)\nprint(16 >> 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "15\n8\n6\n16\n4"
+
+
+def test_bitwise_unary_operators():
+    """Test bitwise unary operator."""
+    source = "print(~0)\nprint(~1)\nprint(~(-1))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "-1\n-2\n0"
+
+
+def test_augmented_assignment_operators():
+    """Test augmented assignment operators."""
+    source = "x = 10\nx += 5\nprint(x)\nx -= 3\nprint(x)\nx *= 2\nprint(x)\nx //= 4\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "15\n12\n24\n6"
+
+
+def test_simple_assignment_operator():
+    """Test simple assignment operator."""
+    source = "x = 42\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_annotated_assignment_operator():
+    """Test annotated assignment operator."""
+    source = "x: int = 42\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_assignment_operator_contexts():
+    """Test assignment operator in various contexts."""
+    source = "a = b = c = 1\nprint(a, b, c)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1 1 1"
+
+
+def test_identity_operators():
+    """Test identity operators."""
+    source = "x = [1, 2]\ny = x\nz = [1, 2]\nprint(x is y)\nprint(x is not z)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue"
+
+
+def test_membership_operators():
+    """Test membership operators."""
+    source = "lst = [1, 2, 3]\nprint(1 in lst)\nprint(4 not in lst)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue"
+
+
+def test_matrix_multiplication_operator():
+    """Test matrix multiplication operator."""
+    source = "class M:\n    def __matmul__(self, o): return 'matmul'\na = M()\nprint(a @ a)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "matmul"
+
+
+def test_grouping_delimiters():
+    """Test grouping delimiters."""
+    source = "result = (1 + 2) * 3\nprint(result)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "9"
+
+
+def test_function_delimiters():
+    """Test function call delimiters."""
+    source = "def f(a, b): return a + b\nprint(f(3, 4))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "7"
+
+
+def test_separator_delimiters():
+    """Test separator delimiters."""
+    source = "a, b, c = 1, 2, 3\nprint(a)\nprint(b)\nprint(c)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1\n2\n3"
+
+
+def test_decorator_delimiter():
+    """Test decorator delimiter."""
+    source = "def deco(f):\n    def wrapper():\n        return f() * 2\n    return wrapper\n@deco\ndef f():\n    return 5\nprint(f())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "10"
+
+
+def test_nested_delimiter_structures():
+    """Test nested delimiter structures."""
+    source = "result = {'key': [1, (2, 3)]}\nprint(result['key'][1][0])"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "2"
+
+
+def test_arithmetic_operator_precedence():
+    """Test arithmetic operator precedence."""
+    source = "print(2 + 3 * 4)\nprint((2 + 3) * 4)\nprint(2 ** 3 ** 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "14\n20\n512"
+
+
+def test_bitwise_operator_precedence():
+    """Test bitwise operator precedence."""
+    source = "print(1 | 2 & 3)\nprint((1 | 2) & 3)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\n3"
+
+
+def test_logical_operator_precedence():
+    """Test logical operator precedence."""
+    source = "print(True or False and False)\nprint(not True or True)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue"
+
+
+def test_arithmetic_operator_associativity():
+    """Test arithmetic operator associativity."""
+    source = "print(10 - 3 - 2)\nprint(2 ** 3 ** 2)"  # Left and right assoc
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "5\n512"
+
+
+def test_chained_comparisons():
+    """Test chained comparison operators."""
+    source = "print(1 < 2 < 3)\nprint(1 < 2 > 0)\nprint(1 == 1 != 2)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue\nTrue"
+
+
+def test_operator_precedence_validation():
+    """Test operator precedence validation."""
+    source = "print(2 + 3 * 4 - 1)\nprint(4 * 2 / 8)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "13\n1.0"
+
+
+def test_operator_with_different_types():
+    """Test operators with different types."""
+    source = "print(1 + 1.5)\nprint('hi' * 3)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "2.5\nhihihi"
+
+
+def test_operator_ast_structure_validation():
+    """Test operator AST structure validation."""
+    source = "x = 1 + 2\nprint(x)\ny = x * 3\nprint(y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\n9"
+
+
+def test_incomplete_operators():
+    """Test incomplete operator expressions are errors."""
+    _, _, rc = clython_run("print(1 +)")
+    assert rc != 0
+
+
+def test_invalid_operator_combinations():
+    """Test invalid operator combinations."""
+    _, _, rc = clython_run("print(1 + * 2)")
+    assert rc != 0
+
+
+def test_invalid_delimiter_usage():
+    """Test invalid delimiter usage."""
+    _, _, rc = clython_run("print([1, 2, 3)")
+    assert rc != 0
+
+
+def test_comprehensive_operator_expression():
+    """Test comprehensive operator expression."""
+    # (2+3)*4 - 6//2 + 1 = 5*4 - 3 + 1 = 20 - 3 + 1 = 18
+    source = "result = (2 + 3) * 4 - 6 // 2 + 1\nprint(result)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "18"
