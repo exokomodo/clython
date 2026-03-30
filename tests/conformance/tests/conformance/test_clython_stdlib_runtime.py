@@ -10,6 +10,7 @@ Modules covered:
   - functools
   - itertools
   - keyword
+  - re
 """
 
 import os
@@ -273,6 +274,58 @@ class TestFunctoolsModule:
         )
         assert rc == 0
         assert out == "8"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# re module
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestReModule:
+    """Tests for the re stdlib module."""
+
+    def test_match_returns_not_none(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.match(r'\d+', '123') is not None)"
+        )
+        assert rc == 0
+        assert out == "True"
+
+    def test_sub_collapses_whitespace(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.sub(r'\s+', ' ', 'hello  world'))"
+        )
+        assert rc == 0
+        assert out == "hello world"
+
+    def test_compile_returns_pattern(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"p = re.compile(r'[a-z]+')" + "\nprint(type(p).__name__)"
+        )
+        assert rc == 0
+        # CPython uses 're.Pattern', but any non-error type name is acceptable
+        assert out in ("Pattern", "re.Pattern", "SRE_Pattern")
+
+    def test_findall_digits(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.findall(r'\d+', 'abc 12 def 34'))"
+        )
+        assert rc == 0
+        assert out == "['12', '34']"
+
+    def test_search_finds_inner_match(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.search(r'\d+', 'abc123def') is not None)"
+        )
+        assert rc == 0
+        assert out == "True"
+
+    def test_split_on_whitespace(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.split(r'\s+', 'a b  c'))"
+        )
+        assert rc == 0
+        assert out == "['a', 'b', 'c']"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
