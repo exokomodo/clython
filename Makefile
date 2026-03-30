@@ -33,11 +33,12 @@ setup/python: ## Install Python dependencies for conformance testing
 	$(PIP) install -e .
 
 .PHONY: setup/sbcl
-setup/sbcl: ## Install SBCL
+setup/sbcl: ## Install SBCL and Common Lisp dependencies
 ifeq ($(UNAME_S),Linux)
-	sudo apt update && sudo apt install -y sbcl
+	sudo apt update && sudo apt install -y sbcl cl-ppcre
 else ifeq ($(UNAME_S),Darwin)
 	brew install sbcl
+	@echo "On macOS, install cl-ppcre via Quicklisp: (ql:quickload :cl-ppcre)"
 else
 	$(error "Unsupported OS: $(UNAME_S). Please install SBCL manually.")
 endif
