@@ -112,7 +112,6 @@ class TestImportStatementRuntime:
         assert rc == 0
         assert out == "import error"
 
-    @pytest.mark.xfail(reason="collections module not supported in Clython")
     def test_from_import_collections(self):
         """from collections import defaultdict"""
         out, err, rc = clython_run(
@@ -166,7 +165,6 @@ class TestImportStatementRuntime:
         assert rc == 0
         assert out == "sq works\nsqrt not bound"
 
-    @pytest.mark.xfail(reason="random module not supported in Clython")
     def test_import_random_and_use(self):
         """import random module"""
         out, err, rc = clython_run(

@@ -144,7 +144,6 @@ def test_single_underscore_identifier():
     assert out == "throwaway"
 
 
-@pytest.mark.xfail(reason="Name mangling (__name -> _Class__name) not yet implemented in Clython")
 def test_dunder_identifier_in_class():
     """Dunder identifier is valid in class scope."""
     source = "class C:\n    __init_val = 10\nprint(C._C__init_val)"

@@ -41,7 +41,6 @@ def test_walrus_in_if_condition():
     assert out == "3"
 
 
-@pytest.mark.xfail(reason="re module fails to load in Clython (ParseError in re source)")
 def test_walrus_variable_available_after():
     """Variable bound by := is available after the expression."""
     source = (

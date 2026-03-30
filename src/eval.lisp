@@ -4,6 +4,7 @@
 
 (defpackage :clython.eval
   (:use :cl)
+  (:import-from :clython.runtime #:py-exception #:py-exception-value)
   (:export
    #:eval-node
    #:py-return-value
@@ -31,22 +32,7 @@
   ()
   (:documentation "Signalled by `continue` to skip to the next iteration."))
 
-(define-condition py-exception (error)
-  ((value :initarg :value :reader py-exception-value
-          :initform nil))
-  (:report (lambda (c stream)
-             (let ((v (py-exception-value c)))
-               (cond
-                 ((typep v 'clython.runtime:py-exception-object)
-                  (let ((name (clython.runtime:py-exception-class-name v))
-                        (msg  (clython.runtime:py-exception-message v)))
-                    (if (string= msg "")
-                        (format stream "~A" name)
-                        (format stream "~A: ~A" name msg))))
-                 ((typep v 'clython.runtime:py-object)
-                  (format stream "~A" (clython.runtime:py-str-of v)))
-                 (t (format stream "~A" v))))))
-  (:documentation "Signalled by `raise` — wraps a Python exception object."))
+
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Generic function
@@ -203,11 +189,25 @@
            (clython.runtime:make-py-bytes
             (map '(vector (unsigned-byte 8)) #'char-code (%unquote-string val)))
            (clython.runtime:make-py-str (%unquote-string val))))
-      ;; Adjacent string concatenation: (:concat-strings "part1" "part2" ...)
+      ;; Adjacent string/bytes concatenation: (:concat-strings "part1" "b'part2'" ...)
       ((and (consp val) (eq (car val) :concat-strings))
-       (clython.runtime:make-py-str
-        (apply #'concatenate 'string
-               (mapcar #'%unquote-string (cdr val)))))
+       (let* ((parts (cdr val))
+              ;; Detect bytes by checking if the raw token has b prefix
+              (bytes-p (and (stringp (car parts))
+                            (> (length (car parts)) 0)
+                            (let ((i 0) (s (car parts)))
+                              (when (find (char s i) "rR") (incf i))
+                              (and (< i (length s))
+                                   (find (char s i) "bB"))))))
+         (if bytes-p
+             ;; All bytes (already validated no mix in parser)
+             (clython.runtime:make-py-bytes
+              (map '(vector (unsigned-byte 8)) #'char-code
+                   (apply #'concatenate 'string
+                          (mapcar #'%unquote-string parts))))
+             (clython.runtime:make-py-str
+              (apply #'concatenate 'string
+                     (mapcar #'%unquote-string parts))))))
       (t (error "Unknown constant value: ~S" val)))))
 
 (defmethod eval-node ((node clython.ast:name-node) env)
@@ -1249,10 +1249,15 @@
                       (let ((exc-val (py-exception-value exc-info)))
                         (clython.runtime:py-call
                          exit-method
-                         ;; exc_type: the type/class
+                         ;; exc_type: the type/class — look up the actual registered
+                         ;; type so `exc_type is ValueError` identity checks work
                          (if (typep exc-val 'clython.runtime:py-exception-object)
-                             (clython.runtime:make-py-type
-                              :name (clython.runtime:py-exception-class-name exc-val))
+                             (let* ((exc-name (clython.runtime:py-exception-class-name exc-val))
+                                    (looked-up
+                                      (handler-case (clython.scope:env-get exc-name env)
+                                        (clython.runtime:py-runtime-error () nil))))
+                               (or looked-up
+                                   (clython.runtime:make-py-type :name exc-name)))
                              clython.runtime:+py-none+)
                          ;; exc_val: the exception instance
                          (if (typep exc-val 'clython.runtime:py-exception-object)
@@ -1375,8 +1380,18 @@
           (setf (gethash "__doc__" class-dict) (clython.runtime:make-py-str docstring))))
       (dolist (stmt sorted-body)
         (eval-node stmt class-env)))
-    ;; Copy bindings from class scope into class dict
-    (maphash (lambda (k v) (setf (gethash k class-dict) v))
+    ;; Copy bindings from class scope into class dict, applying name mangling.
+    ;; Python mangles names of the form __x (starting with __ but not ending
+    ;; with __) to _ClassName__x within the class namespace.
+    (maphash (lambda (k v)
+               (let ((mangled
+                       (if (and (>= (length k) 2)
+                                (string= (subseq k 0 2) "__")
+                                (not (and (>= (length k) 4)
+                                          (string= (subseq k (- (length k) 2)) "__"))))
+                           (concatenate 'string "_" name k)
+                           k)))
+                 (setf (gethash mangled class-dict) v)))
              (clython.scope:env-bindings class-env))
     ;; Create the type object
     (let ((cls (clython.runtime:make-py-type :name name :bases bases :tdict class-dict)))
@@ -1643,6 +1658,18 @@
 
 (defmethod eval-node ((node clython.ast:nonlocal-node) env)
   (dolist (name (clython.ast:nonlocal-node-names node))
+    ;; Validate that NAME exists in an enclosing (non-global) scope.
+    ;; Python raises SyntaxError if no enclosing binding found.
+    (let ((found nil)
+          (e (clython.scope:env-parent env)))
+      (loop while (and e (clython.scope:env-parent e))
+            do (multiple-value-bind (val exists) (gethash name (clython.scope:env-bindings e))
+                 (declare (ignore val))
+                 (when exists (setf found t) (return)))
+               (setf e (clython.scope:env-parent e)))
+      (unless found
+        (clython.runtime:py-raise "SyntaxError"
+          "no binding for nonlocal '~A' found" name)))
     (clython.scope:env-declare-nonlocal name env))
   clython.runtime:+py-none+)
 

@@ -286,7 +286,6 @@ print(result)
     assert out == "async main\n42"
 
 
-@pytest.mark.xfail(reason="Clython io.StringIO or with statement may not be fully implemented")
 def test_with_statement_at_module_level():
     source = """
 import io

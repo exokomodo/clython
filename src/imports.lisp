@@ -90,19 +90,37 @@
   "Create the sys built-in module."
   (let ((mod (clython.runtime:make-py-module "sys")))
     (setf (gethash "path" (clython.runtime:py-module-dict mod)) (make-sys-path-list))
-    ;; sys.modules — uses *module-registry* as backing store
-    ;; We populate a py-dict from the registry; it's a snapshot but updated on access
-    (setf (gethash "modules" (clython.runtime:py-module-dict mod))
-          (let ((d (clython.runtime:make-py-dict)))
-            ;; Pre-populate with currently-loaded modules
-            (maphash (lambda (k v)
-                       (clython.runtime:py-setitem
-                        d (clython.runtime:make-py-str k) v))
-                     *module-registry*)
-            ;; Always include sys itself
-            (clython.runtime:py-setitem
-             d (clython.runtime:make-py-str "sys") mod)
-            d))
+    ;; sys.modules — live view over *module-registry*
+    ;; Use a py-object whose __getitem__/__contains__ proxy the registry.
+    (let* ((sys-modules-type (clython.runtime:make-py-type :name "sys.modules"))
+           (sys-mod-obj (make-instance 'clython.runtime:py-object
+                                       :py-class sys-modules-type
+                                       :py-dict (make-hash-table :test #'equal))))
+      (setf (gethash "__getitem__" (clython.runtime:py-object-dict sys-mod-obj))
+            (clython.runtime:make-py-function
+             :name "__getitem__"
+             :cl-fn (lambda (key)
+                      (let ((k (clython.runtime:py-str-value key)))
+                        (multiple-value-bind (v found) (gethash k *module-registry*)
+                          (if found v
+                              (clython.runtime:py-raise "KeyError" "~A" k)))))))
+      (setf (gethash "__contains__" (clython.runtime:py-object-dict sys-mod-obj))
+            (clython.runtime:make-py-function
+             :name "__contains__"
+             :cl-fn (lambda (key)
+                      (let ((k (if (typep key 'clython.runtime:py-str)
+                                   (clython.runtime:py-str-value key)
+                                   (clython.runtime:py-str-of key))))
+                        (if (gethash k *module-registry*)
+                            clython.runtime:+py-true+
+                            clython.runtime:+py-false+)))))
+      (setf (gethash "__setitem__" (clython.runtime:py-object-dict sys-mod-obj))
+            (clython.runtime:make-py-function
+             :name "__setitem__"
+             :cl-fn (lambda (key val)
+                      (setf (gethash (clython.runtime:py-str-value key) *module-registry*) val)
+                      clython.runtime:+py-none+)))
+      (setf (gethash "modules" (clython.runtime:py-module-dict mod)) sys-mod-obj))
     (setf (gethash "version" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-str "3.12.0 (clython)"))
     (setf (gethash "version_info" (clython.runtime:py-module-dict mod))
@@ -791,6 +809,46 @@
                         (setf (gethash "_maps" (clython.runtime:py-object-dict obj)) maps)
                         obj)))))
 
+    ;; defaultdict(default_factory) — dict with default value factory
+    (let ((dd-type (clython.runtime:make-py-type :name "defaultdict")))
+      (setf (gethash "defaultdict" (clython.runtime:py-module-dict mod))
+            (clython.runtime:make-py-function
+             :name "defaultdict"
+             :cl-fn (lambda (&rest args)
+                      (let* ((factory (if args (first args) clython.runtime:+py-none+))
+                             (d (clython.runtime:make-py-dict))
+                             (obj (make-instance 'clython.runtime:py-object
+                                                 :py-class dd-type
+                                                 :py-dict (make-hash-table :test #'equal))))
+                        (setf (gethash "_dict" (clython.runtime:py-object-dict obj)) d)
+                        (setf (gethash "_factory" (clython.runtime:py-object-dict obj)) factory)
+                        (setf (gethash "__getitem__" (clython.runtime:py-object-dict obj))
+                              (clython.runtime:make-py-function
+                               :name "__getitem__"
+                               :cl-fn (lambda (key)
+                                        (let* ((k (clython.runtime:py->cl key))
+                                               (ht (clython.runtime:py-dict-value d)))
+                                          (multiple-value-bind (val found) (gethash k ht)
+                                            (if found val
+                                                (let ((default (clython.runtime:py-call factory)))
+                                                  (setf (gethash k ht) default)
+                                                  default)))))))
+                        (setf (gethash "__setitem__" (clython.runtime:py-object-dict obj))
+                              (clython.runtime:make-py-function
+                               :name "__setitem__"
+                               :cl-fn (lambda (key val)
+                                        (setf (gethash (clython.runtime:py->cl key)
+                                                       (clython.runtime:py-dict-value d))
+                                              val)
+                                        clython.runtime:+py-none+)))
+                        (setf (gethash "__str__" (clython.runtime:py-object-dict obj))
+                              (clython.runtime:make-py-function
+                               :name "__str__"
+                               :cl-fn (lambda ()
+                                        (clython.runtime:make-py-str
+                                         (clython.runtime:py-repr d)))))
+                        obj)))))
+
     mod))
 
 (defun list->adjustable-vector (items)
@@ -914,20 +972,27 @@
                                       nil))
                            (step  (if (>= (length rest-args) 3)
                                       (clython.runtime:py->cl (third rest-args)) 1))
-                           (items (cond
-                                    ((typep iterable 'clython.runtime:py-list)
-                                     (coerce (clython.runtime:py-list-value iterable) 'list))
-                                    ((typep iterable 'clython.runtime:py-tuple)
-                                     (coerce (clython.runtime:py-tuple-value iterable) 'list))
-                                    (t nil)))
+                           (it (clython.runtime:py-iter iterable))
                            (result nil) (i 0))
-                      (dolist (item items)
-                        (when (and (>= i start)
-                                   (or (null stop) (< i stop))
-                                   (zerop (mod (- i start) (max 1 step))))
-                          (push item result))
-                        (incf i))
-                      (clython.runtime:make-py-list (nreverse result))))))
+                      (block done
+                        (handler-bind
+                            ((clython.runtime:stop-iteration
+                              (lambda (c) (declare (ignore c)) (return-from done)))
+                             (clython.runtime:py-exception
+                              (lambda (c)
+                                (let ((v (clython.runtime:py-exception-value c)))
+                                  (when (and (typep v 'clython.runtime:py-exception-object)
+                                             (string= (clython.runtime:py-exception-class-name v) "StopIteration"))
+                                    (return-from done))))))
+                          (loop
+                            (when (and stop (>= i stop)) (return-from done))
+                            (let ((item (clython.runtime:py-next it)))
+                              (when (and (>= i start)
+                                         (zerop (mod (- i start) (max 1 step))))
+                                (push item result))
+                              (incf i)))))
+                      (clython.runtime:make-py-list
+                       (coerce (nreverse result) 'vector))))))
     ;; chain(*iterables)
     (setf (gethash "chain" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
@@ -1240,6 +1305,96 @@
                                        (append bound-args call-args))))))))
     mod))
 
+;;;; ─── io module ─────────────────────────────────────────────────────────────
+
+(defun make-io-module ()
+  "Create an io module with StringIO."
+  (let ((mod (clython.runtime:make-py-module "io"))
+        (stringio-type (clython.runtime:make-py-type :name "StringIO")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "io"))
+    ;; StringIO([initial_value])
+    (setf (gethash "StringIO" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "StringIO"
+           :cl-fn (lambda (&rest args)
+                    (let* ((initial (if args (clython.runtime:py-str-value (first args)) ""))
+                           (buf (make-array (length initial)
+                                            :element-type 'character
+                                            :fill-pointer (length initial)
+                                            :adjustable t
+                                            :initial-contents initial))
+                           (obj (make-instance 'clython.runtime:py-object
+                                               :py-class stringio-type
+                                               :py-dict (make-hash-table :test #'equal))))
+                      (setf (gethash "_buf" (clython.runtime:py-object-dict obj)) buf)
+                      ;; write(s)
+                      (setf (gethash "write" (clython.runtime:py-object-dict obj))
+                            (clython.runtime:make-py-function
+                             :name "write"
+                             :cl-fn (lambda (s)
+                                      (let ((text (clython.runtime:py-str-value s)))
+                                        (loop for ch across text do (vector-push-extend ch buf))
+                                        (clython.runtime:make-py-int (length text))))))
+                      ;; getvalue()
+                      (setf (gethash "getvalue" (clython.runtime:py-object-dict obj))
+                            (clython.runtime:make-py-function
+                             :name "getvalue"
+                             :cl-fn (lambda () (clython.runtime:make-py-str (coerce buf 'string)))))
+                      ;; __enter__ / __exit__ for with statement
+                      (setf (gethash "__enter__" (clython.runtime:py-object-dict obj))
+                            (clython.runtime:make-py-function
+                             :name "__enter__" :cl-fn (lambda () obj)))
+                      (setf (gethash "__exit__" (clython.runtime:py-object-dict obj))
+                            (clython.runtime:make-py-function
+                             :name "__exit__"
+                             :cl-fn (lambda (&rest _) (declare (ignore _))
+                                      clython.runtime:+py-none+)))
+                      obj))))
+    mod))
+
+;;;; ─── random module ────────────────────────────────────────────────────────
+
+(defun make-random-module ()
+  "Create a random module with seed, randint, random, choice."
+  (let ((mod (clython.runtime:make-py-module "random")))
+    (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "random"))
+    ;; seed(a)
+    (setf (gethash "seed" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "seed"
+           :cl-fn (lambda (&rest args)
+                    (let ((s (if args (clython.runtime:py->cl (first args)) 0)))
+                      (setf *random-state* (sb-ext:seed-random-state s)))
+                    clython.runtime:+py-none+)))
+    ;; randint(a, b)
+    (setf (gethash "randint" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "randint"
+           :cl-fn (lambda (a b)
+                    (let ((lo (clython.runtime:py->cl a))
+                          (hi (clython.runtime:py->cl b)))
+                      (clython.runtime:make-py-int (+ lo (random (1+ (- hi lo)))))))))
+    ;; random()
+    (setf (gethash "random" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "random"
+           :cl-fn (lambda () (clython.runtime:make-py-float (random 1.0d0)))))
+    ;; choice(seq)
+    (setf (gethash "choice" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "choice"
+           :cl-fn (lambda (seq)
+                    (let ((items (cond
+                                   ((typep seq 'clython.runtime:py-list)
+                                    (clython.runtime:py-list-value seq))
+                                   ((typep seq 'clython.runtime:py-tuple)
+                                    (clython.runtime:py-tuple-value seq))
+                                   (t (error "choice(): unsupported type")))))
+                      (aref items (random (length items)))))))
+    mod))
+
 (defun register-builtin-modules ()
   "Register all built-in module stubs."
   (setf (gethash "sys" *builtin-modules*) #'make-sys-module)
@@ -1273,11 +1428,13 @@
   (setf (gethash "itertools" *builtin-modules*) #'make-itertools-module)
   (setf (gethash "string" *builtin-modules*) #'make-string-module)
   (setf (gethash "functools" *builtin-modules*) #'make-functools-module)
+  (setf (gethash "io" *builtin-modules*) #'make-io-module)
+  (setf (gethash "random" *builtin-modules*) #'make-random-module)
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
   (setf (gethash "re" *builtin-modules*) #'make-re-module)
   (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"
                   "_weakrefset" "_py_abc" "abc" "types" "warnings"
-                  "io" "stat" "posix" "errno" "copy" "heapq" "reprlib"
+                  "stat" "posix" "errno" "copy" "heapq" "reprlib"
                   "numbers" "codecs" "copyreg" "operator" "threading" "enum"
                   "_sre" "sre_compile" "sre_parse" "sre_constants" "random"
                   "importlib" "dataclasses" "subprocess" "inspect"
