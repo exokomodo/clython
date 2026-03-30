@@ -116,7 +116,6 @@ class TestDelStatementRuntime:
         assert rc == 0
         assert out == "[0, 2, 4]"
 
-    @pytest.mark.xfail(reason="UnboundLocalError not yet raised by Clython for del'd locals")
     def test_del_in_function_scope(self):
         """del removes a local variable in function scope"""
         out, err, rc = clython_run(

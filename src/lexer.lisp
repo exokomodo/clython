@@ -449,6 +449,10 @@
                         (not (eql (ls-char ls) #\Newline)))
              do (ls-advance ls)))
 
+      ;; Null bytes — skip silently (CPython's functools.py has one at line 1013)
+      ((eql (ls-char ls) #\Nul)
+       (ls-advance ls))
+
       ;; Whitespace (spaces/tabs within a line — not leading)
       ((and (eql (ls-char ls) #\Space))
        (ls-advance ls))
@@ -508,11 +512,12 @@
         (declare (ignore line-start-pos))
 
         (cond
-          ;; Blank / comment-only line: skip without INDENT/DEDENT/NEWLINE
+          ;; Blank / comment-only / null-byte-only line: skip without INDENT/DEDENT/NEWLINE
           ((or (ls-at-end-p ls)
                (eql (ls-char ls) #\Newline)
                (eql (ls-char ls) #\Return)
-               (eql (ls-char ls) #\#))
+               (eql (ls-char ls) #\#)
+               (eql (ls-char ls) #\Nul))
            ;; Just consume the rest of the line
            (scan-logical-line ls))
 

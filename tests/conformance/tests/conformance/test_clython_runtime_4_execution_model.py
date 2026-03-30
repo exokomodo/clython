@@ -233,7 +233,6 @@ print(result)
     assert out == "outer\n[1, 2, 3]"
 
 
-@pytest.mark.xfail(reason="Clython does not clean up exception variable after except block")
 def test_exception_variable_cleaned_up():
     source = """
 try:
@@ -265,7 +264,6 @@ print(add10(7))
     assert out == "10\n17"
 
 
-@pytest.mark.xfail(reason="Clython eval() may not be implemented")
 def test_eval_with_namespace():
     source = """
 ns = {'x': 10, 'y': 20}
@@ -277,7 +275,6 @@ print(result)
     assert out == "30"
 
 
-@pytest.mark.xfail(reason="Clython exec() may not be fully implemented")
 def test_exec_creates_variable():
     source = """
 ns = {}
