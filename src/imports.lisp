@@ -768,16 +768,28 @@
                         obj)))))
 
     ;; ChainMap(*maps) — read-first-match view over multiple dicts
-    (setf (gethash "ChainMap" (clython.runtime:py-module-dict mod))
-          (clython.runtime:make-py-function
-           :name "ChainMap"
-           :cl-fn (lambda (&rest maps)
-                    (let ((chain-type (clython.runtime:make-py-type :name "ChainMap"))
-                          (obj (make-instance 'clython.runtime:py-object
-                                              :py-class (clython.runtime:make-py-type :name "ChainMap")
-                                              :py-dict (make-hash-table :test #'equal))))
-                      (setf (gethash "_maps" (clython.runtime:py-object-dict obj)) maps)
-                      obj))))
+    (let ((chainmap-type (clython.runtime:make-py-type :name "ChainMap")))
+      ;; Install __getitem__ on the type so cm['key'] works
+      (setf (gethash "__getitem__" (clython.runtime:py-type-dict chainmap-type))
+            (clython.runtime:make-py-function
+             :name "__getitem__"
+             :cl-fn (lambda (self key)
+                      (let ((maps (gethash "_maps" (clython.runtime:py-object-dict self))))
+                        (dolist (m maps
+                                   (clython.runtime:py-raise "KeyError"
+                                     "~A" (clython.runtime:py-repr key)))
+                          (when (typep m 'clython.runtime:py-dict)
+                            (let ((val (clython.runtime:py-getitem-or-nil m key)))
+                              (when val (return val)))))))))
+      (setf (gethash "ChainMap" (clython.runtime:py-module-dict mod))
+            (clython.runtime:make-py-function
+             :name "ChainMap"
+             :cl-fn (lambda (&rest maps)
+                      (let ((obj (make-instance 'clython.runtime:py-object
+                                                :py-class chainmap-type
+                                                :py-dict (make-hash-table :test #'equal))))
+                        (setf (gethash "_maps" (clython.runtime:py-object-dict obj)) maps)
+                        obj)))))
 
     mod))
 
