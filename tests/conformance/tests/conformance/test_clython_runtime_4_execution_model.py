@@ -320,3 +320,316 @@ print(list(gen))
     out, err, rc = clython_run(source)
     assert rc == 0
     assert out == "outer\n[2, 4, 6]"
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_basic_name_binding():
+    """Test basic name binding patterns."""
+    source = "x = 42\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_multiple_assignment_binding():
+    """Test multiple assignment and tuple unpacking."""
+    source = "a, b, c = 1, 2, 3\nprint(a, b, c)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1 2 3"
+
+
+def test_augmented_assignment_binding():
+    """Test augmented assignment binding behavior."""
+    source = "x = 5\nx += 3\nprint(x)\nx *= 2\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "8\n16"
+
+
+def test_binding_vs_reference_patterns():
+    """Test binding vs reference in name usage."""
+    source = "x = [1, 2, 3]\ny = x\ny.append(4)\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "[1, 2, 3, 4]"
+
+
+def test_local_scope_patterns():
+    """Test local scope resolution."""
+    source = "def f():\n    x = 'local'\n    return x\nprint(f())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "local"
+
+
+def test_enclosing_scope_patterns():
+    """Test enclosing scope resolution."""
+    source = """
+def outer():
+    x = 'outer'
+    def inner():
+        return x
+    return inner()
+print(outer())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "outer"
+
+
+def test_global_scope_patterns():
+    """Test global scope resolution."""
+    source = "g = 'global'\ndef f():\n    global g\n    g = 'modified'\nf()\nprint(g)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "modified"
+
+
+def test_builtin_scope_patterns():
+    """Test built-in scope resolution."""
+    source = "print(len([1, 2, 3]))\nprint(type(42).__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\nint"
+
+
+def test_global_statement_patterns():
+    """Test global statement usage."""
+    source = "x = 1\ndef f():\n    global x\n    x = 99\nf()\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "99"
+
+
+def test_nonlocal_statement_patterns():
+    """Test nonlocal statement usage."""
+    source = """
+def outer():
+    x = 0
+    def inner():
+        nonlocal x
+        x += 1
+    inner()
+    inner()
+    return x
+print(outer())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "2"
+
+
+def test_global_nonlocal_interaction():
+    """Test interaction between global and nonlocal."""
+    source = """
+count = 0
+def outer():
+    total = 0
+    def inner():
+        global count
+        nonlocal total
+        count += 1
+        total += 1
+    inner()
+    inner()
+    return total
+print(outer())
+print(count)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "2\n2"
+
+
+def test_class_scope_patterns():
+    """Test class scope behavior."""
+    source = """
+class C:
+    class_var = 'class'
+    def get(self):
+        return self.class_var
+c = C()
+print(c.get())
+print(C.class_var)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "class\nclass"
+
+
+def test_class_variable_vs_instance_variable():
+    """Test class vs instance variable patterns."""
+    source = """
+class C:
+    shared = 0
+    def __init__(self):
+        self.instance = 1
+c1 = C()
+c2 = C()
+c1.instance = 99
+print(c1.instance)
+print(c2.instance)
+print(C.shared)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "99\n1\n0"
+
+
+def test_method_scope_patterns():
+    """Test method scope behavior."""
+    source = """
+class C:
+    def __init__(self, v):
+        self.v = v
+    def double(self):
+        return self.v * 2
+c = C(5)
+print(c.double())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "10"
+
+
+def test_code_block_nesting():
+    """Test nested code block structure."""
+    source = """
+def outer():
+    def middle():
+        def inner():
+            return 'deep'
+        return inner()
+    return middle()
+print(outer())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "deep"
+
+
+def test_module_level_structure():
+    """Test module-level program structure."""
+    source = "x = 1\ny = 2\nz = x + y\nprint(z)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_globals_locals_patterns():
+    """Test globals() and locals() function usage."""
+    source = """
+x = 42
+def f():
+    local_var = 99
+    return 'local_var' in locals()
+print('x' in globals())
+print(f())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue"
+
+
+@pytest.mark.xfail(strict=False, reason="vars() on instances may not be implemented in Clython")
+def test_vars_dir_patterns():
+    """Test vars() and dir() introspection patterns."""
+    source = """
+class C:
+    def __init__(self):
+        self.x = 1
+        self.y = 2
+c = C()
+v = vars(c)
+print('x' in v)
+print('y' in v)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue"
+
+
+def test_eval_exec_patterns():
+    """Test eval() and exec() usage patterns."""
+    source = "result = eval('1 + 2 + 3')\nprint(result)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "6"
+
+
+def test_exception_scope_patterns():
+    """Test exception variable scope."""
+    source = """
+try:
+    raise ValueError('test')
+except ValueError as e:
+    msg = str(e)
+print(msg)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "test"
+
+
+def test_exception_propagation_patterns():
+    """Test exception propagation through scopes."""
+    source = """
+def inner():
+    raise ValueError('from inner')
+def outer():
+    try:
+        inner()
+    except ValueError as e:
+        return str(e)
+print(outer())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "from inner"
+
+
+def test_statement_vs_expression_structure():
+    """Test distinction between statements and expressions."""
+    source = "x = 1 + 2\nprint(x)\n3 + 4\nprint('ok')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\nok"
+
+
+def test_scope_ast_structure_consistency():
+    """Test scope-related AST structure consistency."""
+    source = "x = 1\ndef f():\n    y = 2\n    return y\nprint(x)\nprint(f())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1\n2"
+
+
+@pytest.mark.xfail(strict=False, reason="sys.modules['__main__'] may not be available in Clython")
+def test_execution_model_introspection():
+    """Test ability to analyze execution model programmatically."""
+    source = """
+import sys
+print(type(sys.modules['__main__']).__name__)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "module"
+
+
+def test_comprehensive_execution_patterns():
+    """Test comprehensive real-world execution patterns."""
+    source = """
+def fibonacci(n):
+    if n <= 1: return n
+    a, b = 0, 1
+    for _ in range(n - 1):
+        a, b = b, a + b
+    return b
+result = [fibonacci(i) for i in range(8)]
+print(result)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "[0, 1, 1, 2, 3, 5, 8, 13]"

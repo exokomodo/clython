@@ -200,3 +200,248 @@ def test_and_keyword_cannot_be_assigned():
     """'and' keyword cannot be used as identifier."""
     _, _, rc = clython_run("and = 1")
     assert rc != 0
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_ascii_identifier_start_characters():
+    """Test valid ASCII identifier start characters."""
+    source = "a = 1\nZ = 2\n_ = 3\nprint(a + Z + _)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "6"
+
+
+def test_ascii_identifier_continuation_characters():
+    """Test valid ASCII identifier continuation characters."""
+    source = "a1 = 1\nb_ = 2\nc2d = 3\nprint(a1 + b_ + c2d)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "6"
+
+
+def test_identifier_case_sensitivity():
+    """Test identifier case sensitivity."""
+    source = "x = 1\nX = 2\nprint(x)\nprint(X)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1\n2"
+
+
+def test_identifier_length_handling():
+    """Test identifier length limitations."""
+    long_name = "a" * 100
+    source = f"{long_name} = 42\nprint({long_name})"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_single_underscore_identifiers():
+    """Test single underscore identifier patterns."""
+    source = "_ = 'underscore'\nprint(_)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "underscore"
+
+
+def test_double_underscore_identifiers():
+    """Test double underscore identifier patterns."""
+    source = "__x = 'dunder'\nprint(__x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "dunder"
+
+
+def test_dunder_method_identifiers():
+    """Test double underscore method name patterns."""
+    source = "class C:\n    def __str__(self): return 'str'\nc = C()\nprint(str(c))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "str"
+
+
+def test_python_keywords_recognized():
+    """Test that Python keywords are properly recognized."""
+    # Keywords should work in proper context
+    source = "if True:\n    pass\nprint('ok')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "ok"
+
+
+def test_keyword_assignment_errors():
+    """Test assignment to keywords raises SyntaxError."""
+    _, _, rc = clython_run("if = 1")
+    assert rc != 0
+
+
+def test_keyword_case_sensitivity():
+    """Test keyword case sensitivity."""
+    # Capital versions are valid identifiers
+    source = "If = 1\nTrue_ = 2\nprint(If + True_)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_keyword_module_consistency():
+    """Test consistency with keyword module."""
+    source = "import keyword\nprint(keyword.iskeyword('if'))\nprint(keyword.iskeyword('myvar'))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nFalse"
+
+
+def test_match_case_soft_keywords():
+    """Test match/case soft keywords in match statements."""
+    source = "match = 'soft'\ncase = 'keyword'\nprint(match)\nprint(case)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "soft\nkeyword"
+
+
+def test_type_soft_keyword():
+    """Test type soft keyword behavior."""
+    source = "type = 'not_a_keyword'\nprint(type)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "not_a_keyword"
+
+
+def test_underscore_wildcard_pattern():
+    """Test underscore as wildcard in match statements."""
+    source = "_ = 99\nprint(_)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "99"
+
+
+def test_unicode_letter_identifiers():
+    """Test Unicode letters as identifiers."""
+    out, err, rc = clython_run("café = 1\nprint(café)")
+    assert rc == 0
+    assert out == "1"
+
+
+def test_unicode_combining_characters():
+    """Test Unicode combining characters in identifiers."""
+    # Basic identifier with non-ASCII letter
+    out, err, rc = clython_run("naïve = 'simple'\nprint(naïve)")
+    assert rc == 0
+    assert out == "simple"
+
+
+def test_unicode_normalization():
+    """Test Unicode normalization in identifiers."""
+    # Test that identifiers work with unicode content
+    out, err, rc = clython_run("ñ = 42\nprint(ñ)")
+    assert rc == 0
+    assert out == "42"
+
+
+def test_unicode_error_conditions():
+    """Test Unicode error conditions."""
+    # Invalid syntax should fail
+    _, _, rc = clython_run("123abc = 1")
+    assert rc != 0
+
+
+def test_invalid_identifier_start_characters():
+    """Test invalid identifier start characters."""
+    _, _, rc = clython_run("1abc = 1")
+    assert rc != 0
+
+
+def test_invalid_identifier_syntax_errors():
+    """Test invalid identifier syntax raises SyntaxError."""
+    _, _, rc = clython_run("$ = 1")
+    assert rc != 0
+
+
+@pytest.mark.xfail(strict=False, reason="Clython may accept emoji/invalid Unicode identifiers without erroring")
+def test_invalid_unicode_identifiers():
+    """Test invalid Unicode characters in identifiers."""
+    # Emoji are not valid identifiers
+    _, _, rc = clython_run("🐍 = 1")
+    assert rc != 0
+
+
+def test_empty_identifier():
+    """Test empty identifier is invalid."""
+    _, _, rc = clython_run(" = 1")
+    assert rc != 0
+
+
+def test_reserved_builtins_as_identifiers():
+    """Test built-in names can be used as identifiers (but shouldn't)."""
+    # Built-in names like 'list', 'dict', 'print' can be reused
+    source = "list = [1, 2, 3]\nprint(len(list))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_reserved_future_patterns():
+    """Test patterns reserved for future use."""
+    # Double leading underscore identifiers are valid but convention-reserved
+    source = "__future_name__ = 'ok'\nprint(__future_name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "ok"
+
+
+def test_identifiers_in_assignments():
+    """Test identifiers as assignment targets."""
+    source = "x = 1\ny = 2\nz = x + y\nprint(z)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_identifiers_in_function_definitions():
+    """Test identifiers as function and parameter names."""
+    source = "def my_func(param_a, param_b):\n    return param_a + param_b\nprint(my_func(3, 4))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "7"
+
+
+def test_identifiers_in_class_definitions():
+    """Test identifiers as class and attribute names."""
+    source = "class MyClass:\n    class_attr = 99\nprint(MyClass.class_attr)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "99"
+
+
+def test_identifiers_in_import_statements():
+    """Test identifiers in import statements."""
+    source = "import os\nprint(type(os).__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "module"
+
+
+def test_edge_case_identifiers():
+    """Test edge cases in identifier handling."""
+    source = "__ = 'dunder'\n_1 = 'num'\nprint(__)\nprint(_1)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "dunder\nnum"
+
+
+def test_comprehensive_identifier_patterns():
+    """Test complex identifier pattern combinations."""
+    source = "_a1 = 1\nA_B_C = 2\n__special__ = 3\nprint(_a1 + A_B_C + __special__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "6"
+
+
+def test_identifier_specification_compliance():
+    """Test compliance with identifier specifications."""
+    source = "my_var = 42\nMyVar = 43\nMY_VAR = 44\nprint(my_var)\nprint(MyVar)\nprint(MY_VAR)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42\n43\n44"

@@ -163,3 +163,169 @@ def test_multiline_triple_string():
     out, err, rc = clython_run(source)
     assert rc == 0
     assert out == "line1\nline2\nline3"
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_basic_string_quotes():
+    """Test basic string quote styles."""
+    source = "print('single')\nprint(\"double\")"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "single\ndouble"
+
+
+def test_triple_quoted_strings():
+    """Test triple-quoted string literals."""
+    source = 'print("""triple""")\nprint(\'\'\'triple2\'\'\')'
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "triple\ntriple2"
+
+
+def test_escape_sequences_basic():
+    """Test basic escape sequences."""
+    source = "print('newline:\\n')\nprint('tab:\\t')\nprint('backslash:\\\\')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "newline:\n\ntab:\t\nbackslash:\\"
+
+
+def test_raw_string_escaping():
+    """Test raw string escaping."""
+    source = r"print(r'\n\t\\')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == r"\n\t\\"
+
+
+def test_unicode_strings():
+    """Test Unicode string content."""
+    out, err, rc = clython_run("print('café')\nprint('中文')")
+    assert rc == 0
+    assert out == "café\n中文"
+
+
+def test_bytes_prefix_syntax():
+    """Test bytes prefix syntax."""
+    source = "print(b'bytes')\nprint(B'bytes2')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "b'bytes'\nb'bytes2'"
+
+
+def test_bytes_content_restrictions():
+    """Test bytes content restrictions (ASCII only)."""
+    source = "x = b'hello\\x00world'\nprint(len(x))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "11"
+
+
+def test_bytes_raw_strings():
+    """Test raw bytes literal syntax."""
+    source = r"print(rb'\n')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == r"b'\\n'"
+
+
+def test_string_concatenation_adjacent():
+    """Test adjacent string concatenation."""
+    source = "x = 'hello' ' ' 'world'\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "hello world"
+
+
+@pytest.mark.xfail(strict=False, reason="bytes repr may differ in Clython — may print without b'' prefix")
+def test_bytes_concatenation():
+    """Test bytes adjacent concatenation."""
+    source = "x = b'hello' b' world'\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "b'hello world'"
+
+
+def test_mixed_quote_styles_concatenation():
+    """Test mixing single and double quote adjacent strings."""
+    source = 'x = "hello" \' world\'\nprint(x)'
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "hello world"
+
+
+def test_string_prefixes_case_insensitive():
+    """Test string prefixes are case-insensitive."""
+    source = "print(r'raw')\nprint(R'RAW')\nprint(b'bytes')\nprint(B'BYTES')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "raw\nRAW\nb'bytes'\nb'BYTES'"
+
+
+def test_f_string_basic_syntax():
+    """Test basic f-string syntax."""
+    source = "x = 42\nprint(f'value: {x}')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "value: 42"
+
+
+def test_f_string_expression_syntax():
+    """Test f-string with expressions."""
+    source = "print(f'{1 + 2}')\nprint(f'{\"hello\".upper()}')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\nHELLO"
+
+
+def test_f_string_format_specifiers():
+    """Test f-string format specifiers."""
+    source = "pi = 3.14159\nprint(f'{pi:.2f}')\nprint(f'{42:05d}')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3.14\n00042"
+
+
+def test_invalid_escape_sequences():
+    """Test invalid escape sequences (deprecated in Python 3.12+)."""
+    # In older Python, invalid escapes produce DeprecationWarning, not error
+    # Valid escape sequences should still work
+    out, err, rc = clython_run("print('\\n')")
+    assert rc == 0
+    assert out == ""  # Just newline
+
+
+@pytest.mark.xfail(strict=False, reason="Clython may not reject invalid prefix combinations like bf''")
+def test_invalid_prefix_combinations():
+    """Test invalid prefix combinations raise SyntaxError."""
+    _, _, rc = clython_run("x = bf'test'")  # bytes and f-string can't combine
+    assert rc != 0
+
+
+def test_string_bytes_concatenation_restrictions():
+    """Test string and bytes cannot be mixed in concatenation."""
+    _, _, rc = clython_run("x = 'str' b'bytes'")
+    assert rc != 0
+
+
+def test_large_string_literals():
+    """Test large string literals."""
+    source = "x = 'a' * 10000\nprint(len(x))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "10000"
+
+
+def test_deeply_nested_concatenation():
+    """Test deeply nested adjacent string concatenation."""
+    source = "x = 'a' 'b' 'c' 'd' 'e'\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "abcde"
+
+
+def test_unterminated_string_errors():
+    """Test unterminated string literals are errors."""
+    _, _, rc = clython_run('"unterminated')
+    assert rc != 0

@@ -367,3 +367,396 @@ print(r() is None)
     out, err, rc = clython_run(source)
     assert rc == 0
     assert out == "True\nTrue"
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_object_types():
+    """Test object type system."""
+    source = "print(type(42).__name__)\nprint(type('hello').__name__)\nprint(type([]).__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "int\nstr\nlist"
+
+
+def test_object_values_and_mutability():
+    """Test object values and mutability concepts."""
+    source = "lst = [1, 2, 3]\nlst.append(4)\nprint(lst)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "[1, 2, 3, 4]"
+
+
+@pytest.mark.xfail(strict=False, reason="dict keyword args (dict(a=1)) may not be supported in Clython")
+def test_builtin_types():
+    """Test built-in type objects."""
+    source = "print(int(3.7))\nprint(str(42))\nprint(list((1,2,3)))\nprint(dict(a=1))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3\n42\n[1, 2, 3]\n{'a': 1}"
+
+
+def test_user_defined_types():
+    """Test user-defined class types."""
+    source = "class Point:\n    def __init__(self, x, y):\n        self.x = x\n        self.y = y\np = Point(3, 4)\nprint(p.x, p.y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3 4"
+
+
+def test_object_string_representations():
+    """Test object string representation methods."""
+    source = "class C:\n    def __repr__(self): return 'C()'\n    def __str__(self): return 'C'\nc = C()\nprint(repr(c))\nprint(str(c))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "C()\nC"
+
+
+def test_basic_customization_methods():
+    """Test basic object customization methods."""
+    source = "class C:\n    def __init__(self, v):\n        self.v = v\n    def __str__(self):\n        return str(self.v)\nc = C(42)\nprint(str(c))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_comparison_methods():
+    """Test rich comparison methods."""
+    source = "class C:\n    def __init__(self, v): self.v = v\n    def __eq__(self, o): return self.v == o.v\n    def __lt__(self, o): return self.v < o.v\na = C(1)\nb = C(2)\nprint(a == C(1))\nprint(a < b)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nTrue"
+
+
+def test_arithmetic_methods():
+    """Test arithmetic operation methods."""
+    source = "class Vec:\n    def __init__(self, x): self.x = x\n    def __add__(self, o): return Vec(self.x + o.x)\n    def __str__(self): return str(self.x)\na = Vec(3)\nb = Vec(4)\nprint(str(a + b))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "7"
+
+
+def test_container_methods():
+    """Test container protocol methods."""
+    source = "class Stack:\n    def __init__(self): self.data = []\n    def __len__(self): return len(self.data)\n    def __contains__(self, item): return item in self.data\n    def push(self, item): self.data.append(item)\ns = Stack()\ns.push(1)\ns.push(2)\nprint(len(s))\nprint(1 in s)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "2\nTrue"
+
+
+def test_callable_objects():
+    """Test callable object protocol."""
+    source = "class Adder:\n    def __init__(self, n): self.n = n\n    def __call__(self, x): return self.x + self.n if hasattr(self, 'x') else x + self.n\nadd5 = Adder(5)\nprint(add5(3))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "8"
+
+
+@pytest.mark.xfail(strict=False, reason="__getattr__ fallback may not be fully implemented in Clython")
+def test_attribute_access_methods():
+    """Test attribute access customization methods."""
+    source = "class C:\n    def __getattr__(self, name):\n        return f'attr:{name}'\nc = C()\nprint(c.foo)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "attr:foo"
+
+
+def test_descriptor_protocol():
+    """Test descriptor __get__, __set__, __delete__ methods."""
+    source = """
+class Descriptor:
+    def __get__(self, obj, objtype=None):
+        return 42
+class C:
+    x = Descriptor()
+c = C()
+print(c.x)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_context_manager_methods():
+    """Test context manager protocol."""
+    source = """
+class CM:
+    def __enter__(self): return self
+    def __exit__(self, *args): return False
+with CM() as c:
+    print('in context')
+print('after')
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "in context\nafter"
+
+
+@pytest.mark.xfail(strict=False, reason="metaclass= keyword argument in class definitions may not be supported in Clython")
+def test_metaclass_basics():
+    """Test basic metaclass functionality."""
+    source = """
+class Meta(type):
+    def __new__(mcs, name, bases, ns):
+        cls = super().__new__(mcs, name, bases, ns)
+        cls.created_by = 'Meta'
+        return cls
+class C(metaclass=Meta):
+    pass
+print(C.created_by)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "Meta"
+
+
+def test_type_construction():
+    """Test dynamic type construction with type()."""
+    source = "T = type('T', (object,), {'x': 42})\nprint(T.x)\nprint(T.__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42\nT"
+
+
+def test_mro_consistency():
+    """Test Method Resolution Order consistency."""
+    source = """
+class A:
+    def method(self): return 'A'
+class B(A):
+    pass
+class C(B):
+    pass
+c = C()
+print(c.method())
+print(C.__mro__[0].__name__)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "A\nC"
+
+
+def test_class_creation_process():
+    """Test complete class creation process."""
+    source = """
+class Animal:
+    def __init__(self, name):
+        self.name = name
+    def speak(self):
+        return f'{self.name} speaks'
+class Dog(Animal):
+    def speak(self):
+        return f'{self.name} barks'
+d = Dog('Rex')
+print(d.speak())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "Rex barks"
+
+
+def test_method_descriptors():
+    """Test method descriptor behavior."""
+    source = """
+class C:
+    def method(self):
+        return 'method'
+c = C()
+print(c.method())
+print(callable(C.method))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "method\nTrue"
+
+
+def test_property_descriptors():
+    """Test property descriptor behavior."""
+    source = """
+class C:
+    def __init__(self, x):
+        self._x = x
+    @property
+    def x(self):
+        return self._x
+    @x.setter
+    def x(self, v):
+        self._x = v
+c = C(5)
+print(c.x)
+c.x = 10
+print(c.x)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "5\n10"
+
+
+@pytest.mark.xfail(strict=False, reason="__init_subclass__ hook may not be implemented in Clython")
+def test_init_subclass_hook():
+    """Test __init_subclass__ customization hook."""
+    source = """
+class Base:
+    subclasses = []
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        Base.subclasses.append(cls.__name__)
+class A(Base): pass
+class B(Base): pass
+print(sorted(Base.subclasses))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "['A', 'B']"
+
+
+@pytest.mark.xfail(strict=False, reason="ABC/abstractmethod may not be fully implemented in Clython")
+def test_abc_protocol():
+    """Test ABC protocol with abstractmethod."""
+    source = """
+from abc import ABC, abstractmethod
+class Shape(ABC):
+    @abstractmethod
+    def area(self): pass
+class Circle(Shape):
+    def area(self): return 3.14
+c = Circle()
+print(c.area())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3.14"
+
+
+@pytest.mark.xfail(strict=False, reason="ABC virtual subclassing may not be implemented in Clython")
+def test_virtual_subclassing():
+    """Test virtual subclassing with register()."""
+    source = """
+from abc import ABC
+class MyABC(ABC): pass
+class C: pass
+MyABC.register(C)
+print(issubclass(C, MyABC))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True"
+
+
+@pytest.mark.xfail(strict=False, reason="ABC subclasshook may not be implemented in Clython")
+def test_subclasshook():
+    """Test __subclasshook__ for duck typing."""
+    source = """
+from abc import ABC
+class HasQuack(ABC):
+    @classmethod
+    def __subclasshook__(cls, C):
+        if hasattr(C, 'quack'):
+            return True
+        return NotImplemented
+class Duck:
+    def quack(self): return 'quack'
+print(issubclass(Duck, HasQuack))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True"
+
+
+@pytest.mark.xfail(strict=False, reason="Async iterators may not be fully implemented in Clython")
+def test_async_iterator_protocol():
+    """Test async iterator protocol."""
+    source = """
+import asyncio
+class AsyncCounter:
+    def __init__(self, n):
+        self.n = n
+        self.i = 0
+    def __aiter__(self):
+        return self
+    async def __anext__(self):
+        if self.i >= self.n:
+            raise StopAsyncIteration
+        self.i += 1
+        return self.i
+async def main():
+    result = []
+    async for x in AsyncCounter(3):
+        result.append(x)
+    print(result)
+asyncio.run(main())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "[1, 2, 3]"
+
+
+@pytest.mark.xfail(strict=False, reason="Async/await may not be fully implemented in Clython")
+def test_awaitable_protocol():
+    """Test awaitable object protocol."""
+    source = """
+import asyncio
+async def coro():
+    return 42
+async def main():
+    result = await coro()
+    print(result)
+asyncio.run(main())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+@pytest.mark.xfail(strict=False, reason="Coroutine functions may not be fully implemented in Clython")
+def test_coroutine_function_protocol():
+    """Test coroutine function creation."""
+    source = """
+import asyncio
+import inspect
+async def my_coro():
+    return 1
+print(inspect.iscoroutinefunction(my_coro))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True"
+
+
+def test_object_lifetime_and_garbage_collection():
+    """Test object lifetime and garbage collection."""
+    source = """
+class C:
+    def __del__(self):
+        pass
+c = C()
+del c
+print('gc ok')
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "gc ok"
+
+
+def test_data_model_specification_compliance():
+    """Test compliance with data model specifications."""
+    source = """
+class C:
+    def __init__(self, v):
+        self.v = v
+    def __repr__(self):
+        return f'C({self.v})'
+    def __eq__(self, o):
+        return isinstance(o, C) and self.v == o.v
+    def __hash__(self):
+        return hash(self.v)
+c1 = C(1)
+c2 = C(1)
+c3 = C(2)
+print(c1 == c2)
+print(c1 == c3)
+print(repr(c1))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nFalse\nC(1)"

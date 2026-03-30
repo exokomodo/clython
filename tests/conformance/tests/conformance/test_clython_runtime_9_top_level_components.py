@@ -323,3 +323,215 @@ print([fib(i) for i in range(8)])
     out, err, rc = clython_run(source)
     assert rc == 0
     assert out == "[0, 1, 1, 2, 3, 5, 8, 13]"
+
+
+# --- Additional tests to cover all source test cases ---
+
+def test_minimal_programs():
+    """Test minimal program structures."""
+    out, err, rc = clython_run("pass")
+    assert rc == 0
+    assert out == ""
+
+
+def test_simple_complete_programs():
+    """Test simple complete programs."""
+    out, err, rc = clython_run("print('hello, world')")
+    assert rc == 0
+    assert out == "hello, world"
+
+
+def test_simple_expressions():
+    """Test simple expressions at top level."""
+    out, err, rc = clython_run("1 + 2\nprint('ok')")
+    assert rc == 0
+    assert out == "ok"
+
+
+def test_expression_statements_in_programs():
+    """Test expression statements in programs."""
+    source = "x = 42\nx\nprint(x)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_module_level_statements():
+    """Test module-level statement execution."""
+    source = "x = 1\ny = 2\nz = x + y\nprint(z)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3"
+
+
+def test_function_definition_patterns():
+    """Test function definition at module level."""
+    source = "def greet(name):\n    return f'Hello, {name}!'\nprint(greet('World'))"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "Hello, World!"
+
+
+def test_class_definition_patterns():
+    """Test class definition at module level."""
+    source = "class Point:\n    def __init__(self, x, y):\n        self.x = x\n        self.y = y\np = Point(3, 4)\nprint(p.x, p.y)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "3 4"
+
+
+def test_import_statement_patterns():
+    """Test import statements at module level."""
+    source = "import os\nprint(type(os).__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "module"
+
+
+def test_import_organization():
+    """Test import organization patterns."""
+    source = "import sys\nimport os\nprint(isinstance(sys.version, str))\nprint(type(os).__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True\nmodule"
+
+
+@pytest.mark.xfail(strict=False, reason="Module __doc__ attribute may not be set in Clython")
+def test_module_docstrings():
+    """Test module docstrings."""
+    source = '"""Module docstring."""\nprint(__doc__)'
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "Module docstring."
+
+
+def test_module_ast_structure():
+    """Test module AST structure."""
+    source = "x = 1\ndef f(): return x\nprint(f())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "1"
+
+
+def test_nested_definitions():
+    """Test nested function/class definitions."""
+    source = """
+def outer():
+    def inner():
+        return 42
+    return inner()
+print(outer())
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42"
+
+
+def test_main_guard_patterns():
+    """Test __name__ == '__main__' pattern."""
+    source = "if __name__ == '__main__':\n    print('main')"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "main"
+
+
+def test_complex_expressions():
+    """Test complex expressions at top level."""
+    source = "result = [x**2 for x in range(5) if x % 2 == 0]\nprint(result)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "[0, 4, 16]"
+
+
+def test_module_initialization_patterns():
+    """Test module initialization patterns."""
+    source = "CONSTANT = 42\nDEFAULT = 'value'\nprint(CONSTANT)\nprint(DEFAULT)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "42\nvalue"
+
+
+@pytest.mark.xfail(strict=False, reason="Script vs module distinction may differ in Clython")
+def test_script_vs_module_patterns():
+    """Test script vs module patterns."""
+    source = "print(__name__)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "__main__"
+
+
+def test_program_organization_patterns():
+    """Test program organization patterns."""
+    source = """
+import sys
+
+CONST = 100
+
+def compute(x):
+    return x * CONST
+
+class Result:
+    def __init__(self, v):
+        self.v = v
+
+r = Result(compute(2))
+print(r.v)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "200"
+
+
+def test_program_component_integration():
+    """Test program component integration."""
+    source = """
+def add(a, b): return a + b
+def mul(a, b): return a * b
+result = mul(add(2, 3), add(1, 4))
+print(result)
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "25"
+
+
+def test_program_consistency():
+    """Test program consistency."""
+    source = "x = 5\ny = x * 2\nz = y + x\nprint(z)"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "15"
+
+
+@pytest.mark.xfail(strict=False, reason="dir() at module level may not be implemented in Clython")
+def test_program_introspection_capabilities():
+    """Test program introspection capabilities."""
+    source = "x = 42\nprint('x' in dir())"
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "True"
+
+
+def test_comprehensive_program_patterns():
+    """Test comprehensive real-world program patterns."""
+    source = """
+def fibonacci(n):
+    a, b = 0, 1
+    result = []
+    for _ in range(n):
+        result.append(a)
+        a, b = b, a + b
+    return result
+
+class FibSequence:
+    def __init__(self, n):
+        self.seq = fibonacci(n)
+    def __str__(self):
+        return str(self.seq)
+
+fs = FibSequence(8)
+print(str(fs))
+"""
+    out, err, rc = clython_run(source)
+    assert rc == 0
+    assert out == "[0, 1, 1, 2, 3, 5, 8, 13]"
