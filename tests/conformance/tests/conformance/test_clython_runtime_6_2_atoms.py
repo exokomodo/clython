@@ -40,7 +40,6 @@ class TestBuiltinConstants:
         assert rc == 0
         assert out == "NoneType"
 
-    @pytest.mark.xfail(reason="Clython reports ellipsis type as 'PY-ELLIPSIS' instead of 'ellipsis'")
     def test_ellipsis_is_ellipsis(self):
         out, err, rc = clython_run("print(type(...).__name__)")
         assert rc == 0
@@ -256,7 +255,6 @@ class TestSetDisplays:
 
 
 class TestGeneratorExpressions:
-    @pytest.mark.xfail(reason="Clython reports generator type as 'PY-GENERATOR' instead of 'generator'")
     def test_generator_type(self):
         out, err, rc = clython_run("g = (x for x in range(3))\nprint(type(g).__name__)")
         assert rc == 0
