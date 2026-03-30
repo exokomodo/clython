@@ -7,6 +7,7 @@ Modules covered:
   - collections
   - json
   - math
+  - re
   - functools
   - itertools
   - keyword
@@ -94,6 +95,22 @@ class TestStringModule:
         out, _, rc = clython_run("import string\nprint('!' in string.punctuation)")
         assert rc == 0
         assert out == "True"
+
+    @pytest.mark.xfail(strict=False, reason="string.Formatter not implemented in Clython")
+    def test_formatter_format(self):
+        out, _, rc = clython_run(
+            "import string\nprint(string.Formatter().format('Hello {name}', name='world'))"
+        )
+        assert rc == 0
+        assert out == "Hello world"
+
+    @pytest.mark.xfail(strict=False, reason="string.Template not implemented in Clython")
+    def test_template_substitute(self):
+        out, _, rc = clython_run(
+            "import string\nprint(string.Template('$x').substitute(x=42))"
+        )
+        assert rc == 0
+        assert out == "42"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -273,6 +290,64 @@ class TestFunctoolsModule:
         )
         assert rc == 0
         assert out == "8"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# re module
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestReModule:
+    """Tests for the re stdlib module."""
+
+    @pytest.mark.xfail(strict=False, reason="re.match returns None instead of a match object")
+    def test_match_returns_not_none(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.match(r'\d+', '123') is not None)"
+        )
+        assert rc == 0
+        assert out == "True"
+
+    @pytest.mark.xfail(strict=False, reason="re.sub not implemented or broken in Clython")
+    def test_sub_collapses_whitespace(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.sub(r'\s+', ' ', 'hello  world'))"
+        )
+        assert rc == 0
+        assert out == "hello world"
+
+    @pytest.mark.xfail(strict=False, reason="re.compile pattern type not yet implemented")
+    def test_compile_returns_pattern(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"p = re.compile(r'[a-z]+')" + "\nprint(type(p).__name__)"
+        )
+        assert rc == 0
+        # CPython uses 're.Pattern', but any non-error type name is acceptable
+        assert out in ("Pattern", "re.Pattern", "SRE_Pattern")
+
+    @pytest.mark.xfail(strict=False, reason="re.findall not implemented or broken in Clython")
+    def test_findall_digits(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.findall(r'\d+', 'abc 12 def 34'))"
+        )
+        assert rc == 0
+        assert out == "['12', '34']"
+
+    @pytest.mark.xfail(strict=False, reason="re.search not implemented or broken in Clython")
+    def test_search_finds_inner_match(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.search(r'\d+', 'abc123def') is not None)"
+        )
+        assert rc == 0
+        assert out == "True"
+
+    @pytest.mark.xfail(strict=False, reason="re.split not implemented or broken in Clython")
+    def test_split_on_whitespace(self):
+        out, _, rc = clython_run(
+            r"import re" + "\n" + r"print(re.split(r'\s+', 'a b  c'))"
+        )
+        assert rc == 0
+        assert out == "['a', 'b', 'c']"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
