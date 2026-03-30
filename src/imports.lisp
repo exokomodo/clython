@@ -236,7 +236,7 @@
                       (clython.runtime:make-py-int
                        (loop for i from 1 to v
                              for acc = 1 then (* acc i)
-                             finally (return acc)))))))
+                             finally (return (if (zerop v) 1 acc))))))))
     ;; gcd(a, b)
     (setf (gethash "gcd" d)
           (clython.runtime:make-py-function
