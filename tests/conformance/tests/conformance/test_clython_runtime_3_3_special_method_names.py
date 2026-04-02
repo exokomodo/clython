@@ -610,7 +610,6 @@ print(list(s))
     assert out == "3\nTrue\n[1, 2, 3]"
 
 
-@pytest.mark.xfail(strict=False, reason="__next__ iterator protocol may not be fully implemented in Clython")
 def test_iterator_methods():
     """Test iterator protocol methods."""
     source = """
@@ -817,7 +816,6 @@ print(str(c))
     assert out == "args=(1, 2, 3)"
 
 
-@pytest.mark.xfail(strict=False, reason="Name mangling (__name -> _Class__name) may not be implemented in Clython")
 def test_invalid_special_method_names():
     """Test that invalid special method names parse but are not special."""
     source = """

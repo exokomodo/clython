@@ -451,7 +451,6 @@ def test_module_initialization_patterns():
     assert out == "42\nvalue"
 
 
-@pytest.mark.xfail(strict=False, reason="Script vs module distinction may differ in Clython")
 def test_script_vs_module_patterns():
     """Test script vs module patterns."""
     source = "print(__name__)"
