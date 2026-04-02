@@ -73,7 +73,7 @@ conformance-cpython: ## Run conformance test suite against CPython (baseline)
 		. $(VENV_DIR)/bin/activate
 	fi
 	cd tests/conformance
-	$(PYTEST) tests/ -v --tb=short --ignore=tests/conformance/test_clython_smoke.py
+	$(PYTEST) tests/ -n auto -v --tb=short --ignore=tests/conformance/test_clython_smoke.py
 
 .PHONY: conformance-clython
 conformance-clython: ## Run conformance test suite against Clython
@@ -81,7 +81,7 @@ conformance-clython: ## Run conformance test suite against Clython
 		. $(VENV_DIR)/bin/activate
 	fi
 	cd tests/conformance
-	CLYTHON_BIN=$(CURDIR)/bin/clython $(PYTEST) tests/conformance/test_clython_*.py -v --tb=short
+	CLYTHON_BIN=$(CURDIR)/bin/clython $(PYTEST) tests/conformance/test_clython_*.py -n auto -v --tb=short
 
 ##@ Utilities
 
