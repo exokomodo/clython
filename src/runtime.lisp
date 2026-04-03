@@ -1339,37 +1339,166 @@
   "Python string % formatting with single arg."
   (make-py-str (%py-string-format (py-str-value a) (list b))))
 
+(defun %py-format-exp (v prec uppercasep)
+  "Format float V in Python scientific notation with PREC decimal places.
+   Returns e.g. '1.234568e+05'. UPPERCASEP uses 'E' instead of 'e'."
+  (let* ((negative (< v 0d0))
+         (av (abs (coerce v 'double-float)))
+         (exp (if (zerop av) 0 (floor (log av 10d0))))
+         ;; Adjust mantissa to be in [1, 10)
+         (mantissa (if (zerop av) 0d0 (/ av (expt 10d0 exp))))
+         ;; Fix rounding that pushes mantissa to 10
+         (mantissa (if (>= mantissa 10d0) (progn (incf exp) (/ mantissa 10d0)) mantissa))
+         (mantissa (if (< mantissa 1d0) (progn (decf exp) (* mantissa 10d0)) mantissa))
+         (mantissa-str (format nil (format nil "~~,~DF" prec) mantissa))
+         (mantissa-str (if negative (concatenate 'string "-" mantissa-str) mantissa-str))
+         (exp-str (format nil "~:[+~;-~]~2,'0D" (< exp 0) (abs exp))))
+    (concatenate 'string mantissa-str (if uppercasep "E" "e") exp-str)))
+
 (defun %py-string-format (fmt args)
-  "Implement Python %-style string formatting."
+  "Implement Python %-style string formatting.
+   Handles flags, width, and precision: e.g. %10d, %-8s, %.9f, %+.3e"
   (let ((result (make-array 0 :element-type 'character :fill-pointer 0 :adjustable t))
         (i 0)
-        (arg-idx 0))
-    (loop while (< i (length fmt)) do
+        (arg-idx 0)
+        (len (length fmt)))
+    (loop while (< i len) do
       (let ((ch (char fmt i)))
-        (if (and (char= ch #\%) (< (1+ i) (length fmt)))
+        (if (and (char= ch #\%) (< (1+ i) len))
             (progn
               (incf i)
-              (let ((spec (char fmt i)))
-                (case spec
-                  (#\s (vector-push-extend-string result (py-str-of (nth arg-idx args)))
+              ;; Collect the full format spec: flags, width, .precision, type
+              ;; flags: -, +, space, 0, #
+              (let ((flags "")
+                    (width "")
+                    (prec nil)
+                    (spec nil))
+                ;; flags
+                (loop while (and (< i len)
+                                 (member (char fmt i) '(#\- #\+ #\space #\0 #\#)))
+                      do (setf flags (concatenate 'string flags (string (char fmt i))))
+                         (incf i))
+                ;; width (digits or *)
+                (loop while (and (< i len) (digit-char-p (char fmt i)))
+                      do (setf width (concatenate 'string width (string (char fmt i))))
+                         (incf i))
+                ;; .precision
+                (when (and (< i len) (char= (char fmt i) #\.))
+                  (incf i)
+                  (setf prec "")
+                  (loop while (and (< i len) (digit-char-p (char fmt i)))
+                        do (setf prec (concatenate 'string prec (string (char fmt i))))
+                           (incf i)))
+                ;; conversion type
+                (when (< i len)
+                  (setf spec (char fmt i))
+                  (incf i))
+                ;; Now format the argument
+                (let* ((arg (nth arg-idx args))
+                       (width-n (if (string= width "") nil (parse-integer width)))
+                       (prec-n  (if prec (parse-integer prec) nil))
+                       (left-align (find #\- flags))
+                       (zero-pad   (and (find #\0 flags) (not left-align)))
+                       (show-sign  (find #\+ flags)))
+                  (labels ((pad (s w)
+                             (if (null w) s
+                                 (let ((deficit (- w (length s))))
+                                   (if (<= deficit 0) s
+                                       (if left-align
+                                           (concatenate 'string s (make-string deficit :initial-element #\space))
+                                           (concatenate 'string
+                                                        (make-string deficit :initial-element (if zero-pad #\0 #\space))
+                                                        s)))))))
+                    (case spec
+                      ((nil #\%)
+                       (vector-push-extend #\% result))
+                      (#\s
+                       (let* ((sv (if (typep arg 'py-str) (py-str-value arg) (py-str-of arg)))
+                              (sv (if prec-n (subseq sv 0 (min prec-n (length sv))) sv)))
+                         (vector-push-extend-string result (pad sv width-n)))
                        (incf arg-idx))
-                  (#\d (vector-push-extend-string result
-                         (write-to-string (py-int-value (nth arg-idx args))))
+                      (#\r
+                       (let* ((sv (py-repr arg))
+                              (sv (if prec-n (subseq sv 0 (min prec-n (length sv))) sv)))
+                         (vector-push-extend-string result (pad sv width-n)))
                        (incf arg-idx))
-                  (#\f (vector-push-extend-string result
-                         (format nil "~F" (if (typep (nth arg-idx args) 'py-float)
-                                              (py-float-value (nth arg-idx args))
-                                              (float (py-int-value (nth arg-idx args)) 1.0d0))))
+                      ((#\d #\i)
+                       (let* ((v (cond ((typep arg 'py-int)   (py-int-value arg))
+                                       ((typep arg 'py-float) (truncate (py-float-value arg)))
+                                       (t 0)))
+                              (s (if (and show-sign (>= v 0))
+                                     (concatenate 'string "+" (write-to-string v))
+                                     (write-to-string v))))
+                         (vector-push-extend-string result (pad s width-n)))
                        (incf arg-idx))
-                  (#\r (vector-push-extend-string result (py-repr (nth arg-idx args)))
+                      (#\x
+                       (let* ((v (if (typep arg 'py-int) (py-int-value arg) 0))
+                              (s (format nil "~x" v)))
+                         (vector-push-extend-string result (pad s width-n)))
                        (incf arg-idx))
-                  (#\x (vector-push-extend-string result
-                         (format nil "~x" (py-int-value (nth arg-idx args))))
+                      (#\X
+                       (let* ((v (if (typep arg 'py-int) (py-int-value arg) 0))
+                              (s (string-upcase (format nil "~x" v))))
+                         (vector-push-extend-string result (pad s width-n)))
                        (incf arg-idx))
-                  (#\% (vector-push-extend #\% result))
-                  (otherwise (vector-push-extend #\% result)
-                             (vector-push-extend spec result)))
-                (incf i)))
+                      (#\o
+                       (let* ((v (if (typep arg 'py-int) (py-int-value arg) 0))
+                              (s (format nil "~o" v)))
+                         (vector-push-extend-string result (pad s width-n)))
+                       (incf arg-idx))
+                      ((#\f #\F)
+                       (let* ((v (cond ((typep arg 'py-float) (py-float-value arg))
+                                       ((typep arg 'py-int)   (float (py-int-value arg) 1.0d0))
+                                       (t 0.0d0)))
+                              (p (or prec-n 6))
+                              (s (format nil (format nil "~~,~DF" p) v))
+                              (s (if (and show-sign (>= v 0))
+                                     (concatenate 'string "+" s) s)))
+                         (vector-push-extend-string result (pad s width-n)))
+                       (incf arg-idx))
+                      ((#\e #\E)
+                       (let* ((v (cond ((typep arg 'py-float) (py-float-value arg))
+                                       ((typep arg 'py-int)   (float (py-int-value arg) 1.0d0))
+                                       (t 0.0d0)))
+                              (p (or prec-n 6))
+                              (s (%py-format-exp v p (char= spec #\E)))
+                              (s (if (and show-sign (>= v 0d0))
+                                     (concatenate 'string "+" s) s)))
+                         (vector-push-extend-string result (pad s width-n)))
+                       (incf arg-idx))
+                      ((#\g #\G)
+                       (let* ((v (cond ((typep arg 'py-float) (py-float-value arg))
+                                       ((typep arg 'py-int)   (float (py-int-value arg) 1.0d0))
+                                       (t 0.0d0)))
+                              (p (max 1 (or prec-n 6)))
+                              (exp (if (zerop v) 0 (floor (log (abs v) 10))))
+                              (s (if (or (< exp -4) (>= exp p))
+                                     (let* ((raw (%py-format-exp v (1- p) (char= spec #\G)))
+                                            (e-pos (position #\e raw :test #'char-equal))
+                                            (mantissa (string-right-trim "0" (subseq raw 0 e-pos)))
+                                            (mantissa (if (char= (char mantissa (1- (length mantissa))) #\.)
+                                                          (subseq mantissa 0 (1- (length mantissa)))
+                                                          mantissa))
+                                            (exp-part (subseq raw e-pos)))
+                                       (concatenate 'string mantissa exp-part))
+                                     (let* ((cl-s (format nil (format nil "~~,~DF" (max 0 (- p 1 exp))) v))
+                                            (trimmed (string-right-trim "0" cl-s)))
+                                       (if (and (find #\. trimmed)
+                                                (char= (char trimmed (1- (length trimmed))) #\.))
+                                           (subseq trimmed 0 (1- (length trimmed)))
+                                           trimmed)))))
+                         (vector-push-extend-string result (pad s width-n)))
+                       (incf arg-idx))
+                      (#\c
+                       (let ((s (cond ((typep arg 'py-str) (subseq (py-str-value arg) 0 1))
+                                      ((typep arg 'py-int) (string (code-char (py-int-value arg))))
+                                      (t ""))))
+                         (vector-push-extend-string result (pad s width-n)))
+                       (incf arg-idx))
+                      (otherwise
+                       ;; Unknown spec — emit literally
+                       (vector-push-extend #\% result)
+                       (when spec (vector-push-extend spec result))))))))
             (progn (vector-push-extend ch result) (incf i)))))
     (coerce result 'string)))
 
