@@ -663,7 +663,6 @@ print(issubclass(Duck, HasQuack))
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="Async iterators may not be fully implemented in Clython")
 def test_async_iterator_protocol():
     """Test async iterator protocol."""
     source = """
@@ -691,7 +690,6 @@ asyncio.run(main())
     assert out == "[1, 2, 3]"
 
 
-@pytest.mark.xfail(strict=False, reason="Async/await may not be fully implemented in Clython")
 def test_awaitable_protocol():
     """Test awaitable object protocol."""
     source = """

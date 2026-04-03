@@ -238,7 +238,6 @@ def test_string_concatenation_adjacent():
     assert out == "hello world"
 
 
-@pytest.mark.xfail(strict=False, reason="bytes repr may differ in Clython — may print without b'' prefix")
 def test_bytes_concatenation():
     """Test bytes adjacent concatenation."""
     source = "x = b'hello' b' world'\nprint(x)"
@@ -296,7 +295,6 @@ def test_invalid_escape_sequences():
     assert out == ""  # Just newline
 
 
-@pytest.mark.xfail(strict=False, reason="Clython may not reject invalid prefix combinations like bf''")
 def test_invalid_prefix_combinations():
     """Test invalid prefix combinations raise SyntaxError."""
     _, _, rc = clython_run("x = bf'test'")  # bytes and f-string can't combine

@@ -407,7 +407,6 @@ def test_invalid_dotted_name_syntax():
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Relative imports require package context in Clython")
 def test_single_dot_relative_imports():
     """Test single dot relative import syntax."""
     source = "from . import something"
@@ -416,7 +415,6 @@ def test_single_dot_relative_imports():
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Relative imports require package context in Clython")
 def test_double_dot_relative_imports():
     """Test double dot relative import syntax."""
     source = "from .. import something"
@@ -424,7 +422,6 @@ def test_double_dot_relative_imports():
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Relative imports require package context in Clython")
 def test_relative_only_dots_imports():
     """Test relative imports with only dots (no module name)."""
     source = "from . import something"
@@ -432,7 +429,6 @@ def test_relative_only_dots_imports():
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Relative imports require package context in Clython")
 def test_relative_import_with_module_names():
     """Test relative imports with explicit module names."""
     source = "from .utils import helper"
@@ -446,7 +442,6 @@ def test_invalid_relative_import_syntax():
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Relative import level in AST may vary in Clython")
 def test_relative_import_level_structure():
     """Test relative import level in AST structure."""
     # Just test that valid import level syntax is recognized
@@ -481,7 +476,6 @@ def test_main_module_patterns():
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="Package/namespace package support may not be implemented in Clython")
 def test_namespace_package_patterns():
     """Test import patterns for namespace packages."""
     source = "import sys\nprint(isinstance(sys.path, list))"
@@ -490,7 +484,6 @@ def test_namespace_package_patterns():
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="Package __init__.py imports may not be fully supported in Clython")
 def test_package_structure_imports():
     """Test imports that assume package structure."""
     source = "import os.path\nprint(hasattr(os, 'path'))"
