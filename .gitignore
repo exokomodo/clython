@@ -234,3 +234,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# AI slop
+.github/skills
+
+
