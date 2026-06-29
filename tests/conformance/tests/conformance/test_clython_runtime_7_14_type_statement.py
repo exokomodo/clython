@@ -55,7 +55,6 @@ class TestTypeStatementSimpleAliases:
         out, err, rc = clython_run("type StringDict = dict[str, str]\nprint(StringDict)")
         assert rc == 0
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_union_alias(self):
         out, err, rc = clython_run("type OptStr = str | None\nprint(OptStr)")
         assert rc == 0
@@ -74,7 +73,6 @@ class TestTypeStatementGenericAliases:
         out, err, rc = clython_run("type Mapping[K, V] = dict[K, V]\nprint(Mapping)")
         assert rc == 0
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_result_union_param(self):
         out, err, rc = clython_run("type Result[T, E] = T | E\nprint(Result)")
         assert rc == 0
@@ -89,14 +87,12 @@ class TestTypeStatementGenericAliases:
 class TestTypeStatementComplexExpressions:
     """Concept 3 – complex / nested type expressions inside type aliases."""
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_nested_generic(self):
         out, err, rc = clython_run(
             "type Config = dict[str, str | int | bool | list[str]]\nprint(Config)"
         )
         assert rc == 0
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_optional_callable(self):
         out, err, rc = clython_run(
             "type Handler[T] = callable[[T], None] | None\nprint(Handler)"
@@ -143,7 +139,6 @@ class TestTypeStatementParamBounds:
         )
         assert rc == 0
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_iterable_alias(self):
         out, err, rc = clython_run(
             "type Iterable[T] = list[T] | tuple[T, ...] | set[T]\nprint(Iterable)"
@@ -358,7 +353,6 @@ class TestTypeStatementCrossImplConsistency:
         out, err, rc = clython_run("type IntAlias = int\nprint(IntAlias)")
         assert rc == 0
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_union_alias_bound(self):
         out, err, rc = clython_run("type UnionAlias = int | str\nprint(UnionAlias)")
         assert rc == 0
@@ -384,7 +378,6 @@ class TestTypeStatementComprehensivePatterns:
         assert rc == 0
         assert out == "ok"
 
-    @pytest.mark.xfail(reason="Not yet supported in Clython")
     def test_generic_container_types(self):
         out, err, rc = clython_run(
             "type Container[T] = list[T] | tuple[T, ...] | set[T]\n"

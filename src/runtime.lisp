@@ -38,6 +38,9 @@
    #:py-super-type
    #:py-super-obj
    #:py-type
+   #:py-union-type
+   #:py-union-type-args
+   #:make-py-union-type
    #:py-module
    #:py-iterator
    #:py-generator
@@ -466,6 +469,14 @@
                  :name  (or name "type")
                  :bases (or bases '())
                  :tdict (or tdict (make-hash-table :test #'equal))))
+
+;;; union type (PEP 604 / 3.10+ `int | str | None`) -----------------------
+(defclass py-union-type (py-object)
+  ((%args :initarg :args :accessor py-union-type-args :initform '()))
+  (:documentation "Python types.UnionType — result of T1 | T2 at type level."))
+
+(defun make-py-union-type (args)
+  (make-instance 'py-union-type :args args))
 
 ;;; module -----------------------------------------------------------------
 (defclass py-module (py-object)
@@ -905,6 +916,21 @@
   (format nil "<class '~A'>" (py-type-name obj)))
 (defmethod py-str-of ((obj py-type)) (py-repr obj))
 
+;;; Union type display: `int | str | None`
+(defun %union-arm-name (obj)
+  "Return the bare name string for a union arm (type, none, string stub, or nested union)."
+  (typecase obj
+    (py-union-type (py-repr obj))
+    (py-type       (py-type-name obj))
+    (py-function   (py-function-name obj))
+    (py-none       "None")
+    (py-str        (py-str-value obj))
+    (t             (py-repr obj))))
+
+(defmethod py-repr ((obj py-union-type))
+  (format nil "~{~A~^ | ~}" (mapcar #'%union-arm-name (py-union-type-args obj))))
+(defmethod py-str-of ((obj py-union-type)) (py-repr obj))
+
 (defmethod py-repr ((obj py-module))
   (format nil "<module '~A'>" (py-module-name obj)))
 (defmethod py-str-of ((obj py-module)) (py-repr obj))
@@ -1229,6 +1255,52 @@
   (py-raise "TypeError"
             "unsupported operand type(s) for &: '~A' and '~A'"
             (py-type-of a) (py-type-of b)))
+;;; PEP 604 / 3.10+ union type construction: int | str | None
+;;; When both sides are type-like (py-type, py-none, py-str stub, py-union-type),
+;;; build or extend a py-union-type instead of raising TypeError.
+
+(defun %type-like-p (obj)
+  "True if OBJ can serve as a union arm (type, None, string stub, function/builtin, or existing union)."
+  (or (typep obj 'py-type)
+      (typep obj 'py-none)
+      (typep obj 'py-union-type)
+      (typep obj 'py-function)
+      (typep obj 'py-str)))
+
+(defun %union-cons (a b)
+  "Build a union from two union-arm values, flattening existing py-union-type args."
+  (let ((left-args  (if (typep a 'py-union-type) (py-union-type-args a) (list a)))
+        (right-args (if (typep b 'py-union-type) (py-union-type-args b) (list b))))
+    (make-py-union-type (append left-args right-args))))
+
+(defmethod py-or ((a py-type) (b py-type))       (%union-cons a b))
+(defmethod py-or ((a py-type) (b py-none))       (%union-cons a b))
+(defmethod py-or ((a py-none) (b py-type))       (%union-cons a b))
+(defmethod py-or ((a py-none) (b py-none))       (%union-cons a b))
+(defmethod py-or ((a py-type) (b py-union-type)) (%union-cons a b))
+(defmethod py-or ((a py-union-type) (b py-type)) (%union-cons a b))
+(defmethod py-or ((a py-union-type) (b py-none)) (%union-cons a b))
+(defmethod py-or ((a py-none) (b py-union-type)) (%union-cons a b))
+(defmethod py-or ((a py-union-type) (b py-union-type)) (%union-cons a b))
+;; Generic type param stubs bound as strings (e.g. T in `type Result[T] = T | E`)
+(defmethod py-or ((a py-str) (b py-type))        (%union-cons a b))
+(defmethod py-or ((a py-type) (b py-str))        (%union-cons a b))
+(defmethod py-or ((a py-str) (b py-none))        (%union-cons a b))
+(defmethod py-or ((a py-none) (b py-str))        (%union-cons a b))
+(defmethod py-or ((a py-str) (b py-union-type))  (%union-cons a b))
+(defmethod py-or ((a py-union-type) (b py-str))  (%union-cons a b))
+(defmethod py-or ((a py-str) (b py-str))         (%union-cons a b))
+;; Builtin type functions (str, int, float, list, …) used as union arms
+(defmethod py-or ((a py-function) (b py-function))  (%union-cons a b))
+(defmethod py-or ((a py-function) (b py-none))      (%union-cons a b))
+(defmethod py-or ((a py-none) (b py-function))      (%union-cons a b))
+(defmethod py-or ((a py-function) (b py-type))      (%union-cons a b))
+(defmethod py-or ((a py-type) (b py-function))      (%union-cons a b))
+(defmethod py-or ((a py-function) (b py-union-type)) (%union-cons a b))
+(defmethod py-or ((a py-union-type) (b py-function)) (%union-cons a b))
+(defmethod py-or ((a py-function) (b py-str))        (%union-cons a b))
+(defmethod py-or ((a py-str) (b py-function))        (%union-cons a b))
+
 (defmethod py-or (a b)
   (py-raise "TypeError"
             "unsupported operand type(s) for |: '~A' and '~A'"
