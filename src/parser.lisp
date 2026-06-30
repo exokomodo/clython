@@ -18,9 +18,16 @@
            #:parser-error
            #:parser-error-message
            #:parser-error-line
-           #:parser-error-column))
+           #:parser-error-column
+           #:*grammar-rules*))
 
 (in-package :clython.parser)
+
+;;; Grammar rule registry — lists grammar rule names (as symbols) that this
+;;; parser currently implements. The grammar coverage test reads this list.
+;;; Updated by the DEFRULE macro when each rule is defined.
+(defparameter *grammar-rules* nil
+  "List of grammar rule name symbols currently implemented by the parser.")
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Section 1: Parser State & Conditions
@@ -215,27 +222,33 @@
    BODY is wrapped in (block nil ...) so (return-from nil ...) works."
   (let ((ps-var (gensym "PS")))
     `(defun ,name (,ps-var)
-       (let* ((memo-key (cons ',name (pstate-pos ,ps-var)))
-              (cached (gethash memo-key (pstate-memo ,ps-var) :no-entry)))
-         (if (not (eq cached :no-entry))
-             ;; Cache hit: restore position and return
-             (progn
-               (setf (pstate-pos ,ps-var) (car cached))
-               (cdr cached))
-             ;; Cache miss: run rule and store result
-             (let* ((start-pos (pstate-pos ,ps-var))
-                    (result (block nil
-                              (let ((ps ,ps-var))
-                                (declare (ignorable ps))
-                                ,@body)))
-                    (end-pos (pstate-pos ,ps-var)))
-               ;; On failure, restore position
-               (when (failp result)
-                 (setf (pstate-pos ,ps-var) start-pos)
-                 (setf end-pos start-pos))
-               (setf (gethash memo-key (pstate-memo ,ps-var))
-                     (cons end-pos result))
-               result))))))
+         (let* ((memo-key (cons ',name (pstate-pos ,ps-var)))
+                (cached (gethash memo-key (pstate-memo ,ps-var) :no-entry)))
+           (if (not (eq cached :no-entry))
+               ;; Cache hit: restore position and return
+               (progn
+                 (setf (pstate-pos ,ps-var) (car cached))
+                 (cdr cached))
+               ;; Cache miss: run rule and store result
+               (let* ((start-pos (pstate-pos ,ps-var))
+                      (result (block nil
+                                (let ((ps ,ps-var))
+                                  (declare (ignorable ps))
+                                  ,@body)))
+                      (end-pos (pstate-pos ,ps-var)))
+                 ;; On failure, restore position
+                 (when (failp result)
+                   (setf (pstate-pos ,ps-var) start-pos)
+                   (setf end-pos start-pos))
+                 (setf (gethash memo-key (pstate-memo ,ps-var))
+                       (cons end-pos result))
+                 result))))))
+
+;;; Also register rules whose function names don't follow the parse-* convention
+;;; but that correspond to grammar rules. Populated at load time.
+(defmacro register-grammar-rule (grammar-name)
+  "Register GRAMMAR-NAME (a symbol) as an implemented grammar rule."
+  `(pushnew ',grammar-name *grammar-rules*))
 
 ;;;; ═══════════════════════════════════════════════════════════════════════════
 ;;;; Section 3: Utility helpers
@@ -3108,3 +3121,65 @@
           (make-instance 'clython.ast:expression-node
                          :body expr
                          :line 1 :col 0)))))
+;;;; ═══════════════════════════════════════════════════════════════════════════
+;;;; Grammar Rule Registry — manual aliases
+;;;;
+;;;; These register grammar rule names for parser functions whose naming
+;;;; convention doesn't auto-derive the correct grammar name.
+;;;; ═══════════════════════════════════════════════════════════════════════════
+
+;; Atoms and expressions
+(register-grammar-rule slices)          ; parse-slice-list
+(register-grammar-rule await_primary)   ; parse-await-expr
+(register-grammar-rule factor)          ; parse-unary (handles unary +/-/~)
+(register-grammar-rule term)            ; parse-unary (handles * / // % @)
+(register-grammar-rule sum)             ; parse-unary (handles + -)
+(register-grammar-rule shift_expr)      ; parse-unary (handles << >>)
+(register-grammar-rule bitwise_and)     ; parse-unary (handles &)
+(register-grammar-rule bitwise_xor)     ; parse-unary (handles ^)
+(register-grammar-rule bitwise_or)      ; parse-unary (handles |)
+(register-grammar-rule inversion)       ; parse-not-test
+(register-grammar-rule conjunction)     ; parse-and-test
+(register-grammar-rule disjunction)     ; parse-or-test
+(register-grammar-rule expression)      ; parse-conditional
+(register-grammar-rule expressions)     ; parse-star-expr-or-expr
+(register-grammar-rule lambdef)         ; parse-lambda
+(register-grammar-rule starred_expression) ; parse-star-expr
+(register-grammar-rule group)           ; parse-paren-expr
+(register-grammar-rule list)            ; parse-list-expr
+(register-grammar-rule dict)            ; parse-dict-or-set
+(register-grammar-rule set)             ; parse-dict-or-set
+(register-grammar-rule for_if_clauses)  ; parse-comp-for
+(register-grammar-rule for_if_clause)   ; parse-comp-for (inner clause)
+(register-grammar-rule string)          ; parse-string-literal
+
+;; Statements
+(register-grammar-rule block)           ; parse-suite
+(register-grammar-rule simple_stmts)    ; parse-simple-stmt-list
+(register-grammar-rule simple_stmt)     ; parse-simple-statement
+(register-grammar-rule compound_stmt)   ; parse-compound-statement
+(register-grammar-rule assignment)      ; parse-assignment-or-expr
+(register-grammar-rule import_from)     ; parse-from-import-stmt
+(register-grammar-rule import_name)     ; parse-import-stmt (import X as Y)
+(register-grammar-rule yield_stmt)      ; parse-yield-expr (as stmt)
+
+;; Definitions
+(register-grammar-rule function_def)    ; parse-funcdef
+(register-grammar-rule function_def_raw) ; parse-funcdef (inner)
+(register-grammar-rule class_def)       ; parse-classdef
+(register-grammar-rule class_def_raw)   ; parse-classdef (inner)
+(register-grammar-rule decorators)      ; parse-decorated
+(register-grammar-rule params)          ; parse-funcdef parameter handling
+(register-grammar-rule parameters)      ; parse-funcdef parameter handling
+(register-grammar-rule annotation)      ; type annotations in funcdef
+
+;; Match statement patterns
+
+;; Star targets
+(register-grammar-rule star_targets)    ; parse-target-list
+(register-grammar-rule star_atom)       ; parse-star-target-atom
+
+;; Top-level
+(register-grammar-rule file)            ; parse-module
+(register-grammar-rule statements)      ; parse-module body
+(register-grammar-rule statement_newline) ; parse-statement + newline
