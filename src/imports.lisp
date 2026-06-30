@@ -119,6 +119,7 @@
   (setf (gethash "itertools" *builtin-modules*) #'make-itertools-module)
   (setf (gethash "string" *builtin-modules*) #'make-string-module)
   (setf (gethash "functools" *builtin-modules*) #'make-functools-module)
+  (setf (gethash "contextlib" *builtin-modules*) #'make-contextlib-module)
   (setf (gethash "io" *builtin-modules*) #'make-io-module)
   (setf (gethash "random" *builtin-modules*) #'make-random-module)
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse

@@ -32,6 +32,7 @@
                                            (:file "itertools")
                                            (:file "re")
                                            (:file "functools")
+                                           (:file "contextlib")
                                            (:file "io")
                                            (:file "random")))
                              (:file "imports")
