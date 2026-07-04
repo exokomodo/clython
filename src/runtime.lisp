@@ -425,14 +425,27 @@
 (defmethod py-getattr ((obj py-super) (name string))
   "Look up NAME in the parent class(es) of the super's type."
   (let* ((cls (py-super-type obj))
+         (self-or-cls (py-super-obj obj))
          (bases (when (typep cls 'py-type) (py-type-bases cls))))
     (dolist (base bases)
       (multiple-value-bind (val found) (%lookup-in-class-hierarchy base name)
         (when found
-          (if (typep val 'py-function)
-              (return-from py-getattr
-                (make-instance 'py-method :function val :self (py-super-obj obj)))
-              (return-from py-getattr val)))))
+          (return-from py-getattr
+            (cond
+              ((typep val 'py-function)
+               ;; Regular method — bind to self/cls
+               (make-instance 'py-method :function val :self self-or-cls))
+              ((typep val 'py-classmethod-wrapper)
+               ;; Classmethod — bind the inner function to the class
+               (let ((fn  (py-classmethod-function val))
+                     (bound-cls (if (typep self-or-cls 'py-type)
+                                    self-or-cls
+                                    (py-super-type obj))))
+                 (make-instance 'py-method :function fn :self bound-cls)))
+              ((typep val 'py-staticmethod-wrapper)
+               ;; Staticmethod — return the raw function
+               (py-staticmethod-function val))
+              (t val))))))
     (py-raise "AttributeError" "'super' object has no attribute '~A'" name)))
 
 (defclass py-method (py-object)
@@ -2447,6 +2460,22 @@
   (let* ((s   (py-str-value obj))
          (len (length s)))
     (make-py-str (coerce (slice-collect s len key (lambda (i) (char s i))) 'string))))
+
+(defmethod py-getitem ((obj py-bytes) (key py-int))
+  (let* ((v   (py-bytes-value obj))
+         (len (length v))
+         (idx (py-int-value key))
+         (i   (if (< idx 0) (+ len idx) idx)))
+    (if (or (< i 0) (>= i len))
+        (py-raise "IndexError" "index out of range")
+        (make-py-int (aref v i)))))
+
+(defmethod py-getitem ((obj py-bytes) (key py-slice))
+  (let* ((v   (py-bytes-value obj))
+         (len (length v)))
+    (make-py-bytes
+     (coerce (slice-collect v len key (lambda (i) (aref v i)))
+             '(vector (unsigned-byte 8))))))
 
 (defun dict-hash-key (key)
   "Unwrap a Python object to a CL value suitable for EQUAL hash-table lookup.

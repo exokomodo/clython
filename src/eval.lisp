@@ -385,11 +385,14 @@
         ;; super() with no args
         (when (and (string= fname "super")
                    (null (clython.ast:call-node-args node)))
-          (let ((cls (ignore-errors (clython.scope:env-get "__class__" env)))
-                (self (ignore-errors (clython.scope:env-get "self" env))))
-            (when (and cls self)
+          (let* ((implicit-cls (ignore-errors (clython.scope:env-get "__class__" env)))
+                 ;; Normal methods use "self"; classmethods and __init_subclass__
+                 ;; use "cls" as the first parameter name.
+                 (self-or-cls (or (ignore-errors (clython.scope:env-get "self" env))
+                                  (ignore-errors (clython.scope:env-get "cls" env)))))
+            (when (and implicit-cls self-or-cls)
               (return-from eval-node
-                (make-instance 'clython.runtime:py-super :type cls :obj self)))))
+                (make-instance 'clython.runtime:py-super :type implicit-cls :obj self-or-cls)))))
         ;; globals() — return dict of global scope bindings
         (when (and (string= fname "globals")
                    (null (clython.ast:call-node-args node)))
@@ -1418,6 +1421,22 @@
                class-dict)
       ;; Register in exception hierarchy if any base is an exception class
       (%maybe-register-exception-class name bases)
+      ;; Fire __init_subclass__ on each base for the new subclass.
+      ;; __init_subclass__ is implicitly a classmethod; we unwrap the wrapper
+      ;; and call the underlying function with the new class as first arg.
+      (dolist (base bases)
+        (when (typep base 'clython.runtime:py-type)
+          (multiple-value-bind (raw found)
+              (clython.runtime::%lookup-in-class-hierarchy base "__init_subclass__")
+            (when found
+              (let ((fn (cond
+                          ((typep raw 'clython.runtime:py-classmethod-wrapper)
+                           (clython.runtime:py-classmethod-function raw))
+                          ((typep raw 'clython.runtime:py-method)
+                           (clython.runtime:py-method-function raw))
+                          (t raw))))
+                (when (typep fn 'clython.runtime:py-function)
+                  (clython.runtime:py-call fn cls)))))))
       ;; Apply decorators (in reverse order)
       (let ((decorated cls))
         (dolist (dec-node (reverse (clython.ast:class-def-node-decorator-list node)))

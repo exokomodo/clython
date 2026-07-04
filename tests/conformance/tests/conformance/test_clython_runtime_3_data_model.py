@@ -592,7 +592,6 @@ print(c.x)
     assert out == "5\n10"
 
 
-@pytest.mark.xfail(strict=False, reason="__init_subclass__ hook may not be implemented in Clython")
 def test_init_subclass_hook():
     """Test __init_subclass__ customization hook."""
     source = """

@@ -383,16 +383,27 @@
       (make-py-tuple (collect-iter (first args)))))
 
 (defbuiltin +builtin-dict+ "dict" (&rest args)
-  (if (null args)
-      (make-py-dict)
-      ;; Accept another dict and copy it
-      (let ((result (make-py-dict))
-            (src (first args)))
-        (when (typep src 'py-dict)
-          (maphash (lambda (k v)
-                     (setf (gethash k (py-dict-value result)) v))
-                   (py-dict-value src)))
-        result)))
+  (let ((result (make-py-dict)))
+    ;; Handle positional arg: another dict or iterable of (key, val) pairs
+    (when args
+      (let ((src (first args)))
+        (cond
+          ((typep src 'py-dict)
+           (maphash (lambda (k v)
+                      (setf (gethash k (py-dict-value result)) v))
+                    (py-dict-value src)))
+          (t
+           ;; iterable of 2-element iterables
+           (dolist (pair (collect-iter src))
+             (let* ((k   (py-getitem pair (make-py-int 0)))
+                    (v   (py-getitem pair (make-py-int 1)))
+                    ;; normalise py-str keys to CL strings for hash lookup
+                    (hk  (if (typep k 'py-str) (py-str-value k) k)))
+               (setf (gethash hk (py-dict-value result)) v)))))))
+    ;; Merge keyword arguments (keys are already CL strings from the evaluator)
+    (dolist (kw *current-kwargs*)
+      (setf (gethash (car kw) (py-dict-value result)) (cdr kw)))
+    result))
 
 (defbuiltin +builtin-set+ "set" (&rest args)
   (if (null args)
@@ -827,7 +838,18 @@
   (unless (clython.runtime:py-type-dict obj-type)
     (setf (clython.runtime:py-type-dict obj-type) (make-hash-table :test #'equal)))
   (setf (gethash "__setattr__" (clython.runtime:py-type-dict obj-type)) raw-setattr)
-  (setf (gethash "__getattribute__" (clython.runtime:py-type-dict obj-type)) raw-getattribute))
+  (setf (gethash "__getattribute__" (clython.runtime:py-type-dict obj-type)) raw-getattribute)
+  ;; object.__init_subclass__ — no-op classmethod stub so super().__init_subclass__(**kwargs) works.
+  ;; Python spec: "This method is called when a class is subclassed."
+  ;; The base object implementation is a no-op.
+  (let ((noop-fn (clython.runtime:make-py-function
+                  :name "__init_subclass__"
+                  :params '(cls)
+                  :cl-fn (lambda (cls) (declare (ignore cls)) clython.runtime:+py-none+))))
+    (setf (gethash "__init_subclass__"
+                   (clython.runtime:py-type-dict obj-type))
+          (make-instance 'clython.runtime:py-classmethod-wrapper
+                         :function noop-fn))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Exception classes — registered as callable py-type objects in *builtins*
