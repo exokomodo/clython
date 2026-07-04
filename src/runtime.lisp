@@ -2209,8 +2209,28 @@
               (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))
             name))
 
+(defun %user-defined-setattr-p (cls)
+  "Return the user-defined __setattr__ if CLS or any non-object base defines it, else NIL.
+  Walks the C3 MRO but skips the built-in object type."
+  (when (typep cls 'py-type)
+    (dolist (c (%compute-c3-mro cls))
+      (when (and (typep c 'py-type)
+                 (not (eq c *object-type*)))
+        (let ((tdict (py-type-dict c)))
+          (when tdict
+            (multiple-value-bind (fn found) (gethash "__setattr__" tdict)
+              (when found (return-from %user-defined-setattr-p fn))))))))
+  nil)
+
 (defmethod py-setattr ((obj py-object) (name string) value)
-  ;; Check for @property setter or data descriptor __set__ in class hierarchy
+  ;; 1. Dispatch user-defined __setattr__ FIRST (before property/descriptor check)
+  (let ((cls (py-object-class obj)))
+    (let ((user-setattr (%user-defined-setattr-p cls)))
+      (when user-setattr
+        (py-call (make-instance 'py-method :function user-setattr :self obj)
+                 (make-py-str name) value)
+        (return-from py-setattr +py-none+))))
+  ;; 2. Check for @property setter or data descriptor __set__ in class hierarchy
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
       (when found
@@ -2232,6 +2252,20 @@
   (setf (gethash name (py-object-dict obj)) value))
 
 (defmethod py-delattr ((obj py-object) (name string))
+  ;; Dispatch user-defined __delattr__ if present (skip built-in object's)
+  (let ((cls (py-object-class obj)))
+    (when (typep cls 'py-type)
+      (dolist (c (%compute-c3-mro cls))
+        (when (and (typep c 'py-type)
+                   (not (eq c *object-type*)))
+          (let ((tdict (py-type-dict c)))
+            (when tdict
+              (multiple-value-bind (fn found) (gethash "__delattr__" tdict)
+                (when found
+                  (py-call (make-instance 'py-method :function fn :self obj)
+                           (make-py-str name))
+                  (return-from py-delattr +py-none+)))))))))
+  ;; Default: remove from instance dict
   (let ((d (py-object-dict obj)))
     (when (hash-table-p d)
       (remhash name d))))
