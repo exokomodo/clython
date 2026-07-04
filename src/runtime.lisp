@@ -2197,6 +2197,13 @@
              (make-instance 'py-method :function val :self obj)))
           ;; Anything else (class attributes, etc.)
           (t (return-from py-getattr val))))))
+  ;; 4. __getattr__ fallback (called when normal lookup fails)
+  (let ((cls (py-object-class obj)))
+    (multiple-value-bind (ga found) (%lookup-in-class-hierarchy cls "__getattr__")
+      (when found
+        (return-from py-getattr
+          (py-call (make-instance 'py-method :function ga :self obj)
+                   (make-py-str name))))))
   (py-raise "AttributeError" "'~A' object has no attribute '~A'"
             (let ((cls (py-object-class obj)))
               (if (typep cls 'py-type) (py-type-name cls) (class-name (class-of obj))))
@@ -2842,6 +2849,30 @@
   (let ((rfn (%lookup-dunder b "__rmul__")))
     (if rfn (py-call rfn b a)
         (py-raise "TypeError" "unsupported operand type(s) for *"))))
+
+(defmethod py-floordiv ((a py-object) b)
+  (let ((fn (%lookup-dunder a "__floordiv__")))
+    (if fn (py-call fn a b)
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__rfloordiv__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for //"))))))
+
+(defmethod py-floordiv (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__rfloordiv__")))
+    (if rfn (py-call rfn b a)
+        (py-raise "TypeError" "unsupported operand type(s) for //"))))
+
+(defmethod py-mod ((a py-object) b)
+  (let ((fn (%lookup-dunder a "__mod__")))
+    (if fn (py-call fn a b)
+        (let ((rfn (when (typep b 'py-object) (%lookup-dunder b "__rmod__"))))
+          (if rfn (py-call rfn b a)
+              (py-raise "TypeError" "unsupported operand type(s) for %"))))))
+
+(defmethod py-mod (a (b py-object))
+  (let ((rfn (%lookup-dunder b "__rmod__")))
+    (if rfn (py-call rfn b a)
+        (py-raise "TypeError" "unsupported operand type(s) for %"))))
 
 (defmethod py-eq ((a py-object) (b py-object))
   (let ((fn (%lookup-dunder a "__eq__")))

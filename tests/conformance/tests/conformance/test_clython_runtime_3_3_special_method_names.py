@@ -210,7 +210,6 @@ print(list(Range(4)))
     assert out == "[0, 1, 2, 3]"
 
 
-@pytest.mark.xfail(reason="Clython __getattr__/__setattr__/__delattr__ may not be fully implemented")
 def test_getattr_setattr_delattr():
     source = """
 class Dynamic:
@@ -493,7 +492,6 @@ print(str(abs(n)))
     assert out == "5\n-5\n5"
 
 
-@pytest.mark.xfail(strict=False, reason="__floordiv__ and __mod__ dispatch may not be implemented in Clython")
 def test_complex_arithmetic_methods():
     """Test complex arithmetic methods."""
     source = """
@@ -662,7 +660,6 @@ with CM() as c:
     assert out == "enter\ninside\nexit"
 
 
-@pytest.mark.xfail(strict=False, reason="__getattr__/__setattr__ fallback may not be fully implemented in Clython")
 def test_attribute_access_methods():
     """Test attribute access methods."""
     source = """

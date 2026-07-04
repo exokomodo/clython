@@ -800,6 +800,35 @@
 (setf clython.runtime:*object-type*
       (gethash "object" *builtins*))
 
+;; Populate object type dict with built-in methods.
+;; object.__setattr__ does a raw write to instance dict, bypassing user __setattr__.
+;; object.__getattribute__ does a raw read from instance dict.
+(let ((obj-type (gethash "object" *builtins*))
+      (raw-setattr (clython.runtime:make-py-function
+                    :name "__setattr__"
+                    :params '(self name value)
+                    :cl-fn (lambda (self name value)
+                             (let ((sname (if (typep name 'clython.runtime:py-str)
+                                             (clython.runtime:py-str-value name)
+                                             (clython.runtime:py-str-value name))))
+                               (unless (hash-table-p (clython.runtime:py-object-dict self))
+                                 (setf (clython.runtime:py-object-dict self)
+                                       (make-hash-table :test #'equal)))
+                               (setf (gethash sname (clython.runtime:py-object-dict self)) value)
+                               clython.runtime:+py-none+))))
+      (raw-getattribute (clython.runtime:make-py-function
+                         :name "__getattribute__"
+                         :params '(self name)
+                         :cl-fn (lambda (self name)
+                                  (let ((sname (if (typep name 'clython.runtime:py-str)
+                                                  (clython.runtime:py-str-value name)
+                                                  (clython.runtime:py-str-value name))))
+                                    (clython.runtime:py-getattr self sname))))))
+  (unless (clython.runtime:py-type-dict obj-type)
+    (setf (clython.runtime:py-type-dict obj-type) (make-hash-table :test #'equal)))
+  (setf (gethash "__setattr__" (clython.runtime:py-type-dict obj-type)) raw-setattr)
+  (setf (gethash "__getattribute__" (clython.runtime:py-type-dict obj-type)) raw-getattribute))
+
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Exception classes — registered as callable py-type objects in *builtins*
 ;;;; ─────────────────────────────────────────────────────────────────────────
