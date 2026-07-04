@@ -396,7 +396,6 @@ def test_import_organization():
     assert out == "True\nmodule"
 
 
-@pytest.mark.xfail(strict=False, reason="Module __doc__ attribute may not be set in Clython")
 def test_module_docstrings():
     """Test module docstrings."""
     source = '"""Module docstring."""\nprint(__doc__)'

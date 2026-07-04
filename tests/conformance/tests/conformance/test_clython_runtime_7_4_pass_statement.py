@@ -150,7 +150,6 @@ class TestPassStatementRuntime:
         assert rc == 0
         assert out == "ok"
 
-    @pytest.mark.xfail(reason="contextlib.contextmanager not supported in Clython")
     def test_pass_in_with_block(self):
         """pass as body of with statement"""
         out, err, rc = clython_run(

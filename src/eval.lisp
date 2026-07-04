@@ -57,8 +57,21 @@
         (body (clython.ast:module-node-body node)))
     ;; Parser produces body in reverse order; sort by line number
     (setf body (%sort-body body))
+    ;; Set __doc__ from module docstring (first stmt that is a bare string expr)
+    ;; Note: %extract-docstring is defined later in this file but available at runtime
+    (when body
+      (let ((first-stmt (first body)))
+        (when (typep first-stmt 'clython.ast:expr-stmt-node)
+          (let ((val (clython.ast:expr-stmt-node-value first-stmt)))
+            (when (typep val 'clython.ast:constant-node)
+              (let ((cv (clython.ast:constant-node-value val)))
+                (when (stringp cv)
+                  (clython.scope:env-set "__doc__"
+                                        (clython.runtime:make-py-str (%unquote-string cv))
+                                        env))))))))
     (dolist (stmt body result)
       (setf result (eval-node stmt env)))))
+
 
 (defun %sort-body (stmts)
   "Sort statement list by source line number (ascending).

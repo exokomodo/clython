@@ -680,6 +680,22 @@
   (py-delattr obj (py-str-value name))
   +py-none+)
 
+(defbuiltin +builtin-vars+ "vars" (&rest args)
+  ;; vars() with no args: return current local namespace (not yet supported)
+  ;; vars(obj): return obj.__dict__ as a dict
+  (if (null args)
+      (py-raise "NotImplementedError" "vars() with no arguments not yet supported in Clython")
+      (let* ((obj (first args))
+             (d (cond
+                  ((typep obj 'py-module)
+                   (py-module-dict obj))
+                  ((typep obj 'py-object)
+                   (py-object-dict obj))
+                  (t nil))))
+        (if (and d (hash-table-p d))
+            (make-py-dict d)
+            (py-raise "TypeError" "vars() argument must have __dict__ attribute")))))
+
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; format
 ;;;; ─────────────────────────────────────────────────────────────────────────
@@ -764,6 +780,7 @@
                (cons "setattr"      +builtin-setattr+)
                (cons "hasattr"      +builtin-hasattr+)
                (cons "delattr"      +builtin-delattr+)
+               (cons "vars"         +builtin-vars+)
                (cons "staticmethod" +builtin-staticmethod+)
                (cons "classmethod"  +builtin-classmethod+)
                (cons "property"     +builtin-property+)

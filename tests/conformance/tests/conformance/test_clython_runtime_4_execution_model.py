@@ -533,7 +533,6 @@ print(f())
     assert out == "True\nTrue"
 
 
-@pytest.mark.xfail(strict=False, reason="vars() on instances may not be implemented in Clython")
 def test_vars_dir_patterns():
     """Test vars() and dir() introspection patterns."""
     source = """
