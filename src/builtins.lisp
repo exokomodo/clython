@@ -61,7 +61,8 @@
    #:+builtin-staticmethod+
    #:+builtin-classmethod+
    #:+builtin-property+
-#:+builtin-format+))
+   #:+builtin-format+
+   #:+builtin-dir+))
 
 (in-package :clython.builtins)
 
@@ -708,6 +709,67 @@
             (py-raise "TypeError" "vars() argument must have __dict__ attribute")))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
+;;;; dir
+;;;; ─────────────────────────────────────────────────────────────────────────
+
+(defun %collect-class-attrs (cls)
+  "Collect all attribute names from CLS and its base classes."
+  (let ((names nil))
+    (when (typep cls 'py-type)
+      ;; Walk the MRO
+      (dolist (c (or (%compute-c3-mro cls) (list cls)))
+        (when (and (typep c 'py-type) (py-type-dict c))
+          (maphash (lambda (k v)
+                     (declare (ignore v))
+                     (push k names))
+                   (py-type-dict c)))))
+    names))
+
+(defbuiltin +builtin-dir+ "dir" (&rest args)
+  ;; dir() with no args: not yet supported
+  (if (null args)
+      (py-raise "NotImplementedError" "dir() with no arguments not yet supported in Clython")
+      (let ((obj (first args)))
+        ;; Check for __dir__ dunder method
+        (let ((dir-fn (%lookup-dunder obj "__dir__")))
+          (if dir-fn
+              ;; Call __dir__ and return sorted list
+              (let ((result (py-call dir-fn obj)))
+                ;; result should be a list; sort it
+                (let* ((items (cond
+                                ((typep result 'py-list)
+                                 (coerce (py-list-value result) 'list))
+                                ((typep result 'py-tuple)
+                                 (coerce (py-tuple-value result) 'list))
+                                (t nil)))
+                       (sorted (sort (copy-list items)
+                                     (lambda (a b)
+                                       (string< (py-str-value a) (py-str-value b))))))
+                  (make-py-list (coerce sorted 'vector))))
+              ;; Default: collect names from instance dict + class hierarchy
+              (let ((names nil))
+                ;; Instance dict
+                (let ((d (cond
+                           ((typep obj 'py-object) (py-object-dict obj))
+                           ((typep obj 'py-module) (py-module-dict obj))
+                           (t nil))))
+                  (when (hash-table-p d)
+                    (maphash (lambda (k v)
+                               (declare (ignore v))
+                               (push k names))
+                             d)))
+                ;; Class hierarchy attrs
+                (let ((cls (when (typep obj 'py-object) (py-object-class obj))))
+                  (when cls
+                    (setf names (append names (%collect-class-attrs cls)))))
+                ;; Deduplicate, sort
+                (let* ((deduped (remove-duplicates names :test #'string=))
+                       (sorted (sort deduped #'string<))
+                       (py-strs (mapcar #'make-py-str sorted)))
+                  (make-py-list (coerce py-strs 'vector))))))
+        )))
+
+;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; format
 ;;;; ─────────────────────────────────────────────────────────────────────────
 
@@ -792,6 +854,7 @@
                (cons "hasattr"      +builtin-hasattr+)
                (cons "delattr"      +builtin-delattr+)
                (cons "vars"         +builtin-vars+)
+               (cons "dir"          +builtin-dir+)
                (cons "staticmethod" +builtin-staticmethod+)
                (cons "classmethod"  +builtin-classmethod+)
                (cons "property"     +builtin-property+)
