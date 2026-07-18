@@ -34,7 +34,9 @@
                                            (:file "functools")
                                            (:file "contextlib")
                                            (:file "io")
-                                           (:file "random")))
+                                           (:file "random")
+                                           (:file "copy")))
+
                              (:file "imports")
                              (:file "eval")
                              (:file "clython")

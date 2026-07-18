@@ -24,7 +24,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.xfail(reason="Clython __new__ may not be fully implemented")
 def test_init_and_new():
     source = """
 class Foo:
@@ -277,7 +276,6 @@ print(d[k2])
     assert out == "value"
 
 
-@pytest.mark.xfail(reason="Clython descriptor protocol (__get__/__set__/__set_name__) may not be fully implemented")
 def test_descriptor_get_set():
     source = """
 class Typed:
@@ -711,7 +709,6 @@ print(c.x)
     assert out == "10"
 
 
-@pytest.mark.xfail(strict=False, reason="copy protocol (__copy__/__deepcopy__) may not be fully implemented in Clython")
 def test_copy_methods():
     """Test copy protocol methods."""
     source = """
@@ -780,7 +777,6 @@ print(str(c))
     assert out == "second"
 
 
-@pytest.mark.xfail(strict=False, reason="__class_getitem__ and type representation may differ in Clython")
 def test_special_method_with_decorators():
     """Test special methods with decorators."""
     source = """
