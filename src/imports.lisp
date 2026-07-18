@@ -122,11 +122,12 @@
   (setf (gethash "contextlib" *builtin-modules*) #'make-contextlib-module)
   (setf (gethash "io" *builtin-modules*) #'make-io-module)
   (setf (gethash "random" *builtin-modules*) #'make-random-module)
+  (setf (gethash "copy" *builtin-modules*) #'make-copy-module)
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
   (setf (gethash "re" *builtin-modules*) #'make-re-module)
   (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"
                   "_weakrefset" "_py_abc" "abc" "types" "warnings"
-                  "stat" "posix" "errno" "copy" "heapq" "reprlib"
+                  "stat" "posix" "errno" "heapq" "reprlib"
                   "numbers" "codecs" "copyreg" "operator" "threading" "enum"
                   "_sre" "sre_compile" "sre_parse" "sre_constants" "random"
                   "importlib" "dataclasses" "subprocess" "inspect"

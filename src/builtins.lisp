@@ -902,6 +902,21 @@
     (setf (clython.runtime:py-type-dict obj-type) (make-hash-table :test #'equal)))
   (setf (gethash "__setattr__" (clython.runtime:py-type-dict obj-type)) raw-setattr)
   (setf (gethash "__getattribute__" (clython.runtime:py-type-dict obj-type)) raw-getattribute)
+  ;; object.__new__ — allocate a fresh instance of the given class.
+  ;; Acts as an implicit staticmethod: the first positional arg is the class.
+  ;; When called via super().__new__(cls), the method self is prepended
+  ;; automatically, so the lambda accepts (cls &rest args) and ignores extras.
+  (setf (gethash "__new__" (clython.runtime:py-type-dict obj-type))
+        (clython.runtime:make-py-function
+         :name "__new__"
+         :params '(cls)
+         :cl-fn (lambda (cls &rest args)
+                  (declare (ignore args))
+                  (if (typep cls 'clython.runtime:py-type)
+                      (make-instance 'clython.runtime:py-object
+                                     :py-class cls
+                                     :py-dict (make-hash-table :test #'equal))
+                      clython.runtime:+py-none+))))
   ;; object.__init_subclass__ — no-op classmethod stub so super().__init_subclass__(**kwargs) works.
   ;; Python spec: "This method is called when a class is subclassed."
   ;; The base object implementation is a no-op.

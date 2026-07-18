@@ -918,7 +918,15 @@
 (defmethod py-str-of ((obj py-frozenset)) (py-repr obj))
 
 (defmethod py-repr ((obj py-function))
-  (format nil "<function ~A>" (py-function-name obj)))
+  (let ((name (py-function-name obj)))
+    ;; Built-in type constructors are classes in Python; represent them accordingly.
+    (if (member name '("int" "str" "float" "bool" "list" "tuple" "dict"
+                       "set" "frozenset" "bytes" "type" "object" "complex"
+                       "range" "enumerate" "zip" "map" "filter" "reversed"
+                       "super" "property" "staticmethod" "classmethod")
+                :test #'string=)
+        (format nil "<class '~A'>" name)
+        (format nil "<function ~A>" name))))
 (defmethod py-str-of ((obj py-function)) (py-repr obj))
 
 (defmethod py-repr ((obj py-method))
@@ -2171,6 +2179,14 @@
   desc)
 
 (defmethod py-getattr ((obj py-object) (name string))
+  ;; Special: __dict__ exposes the instance attribute dictionary as a py-dict
+  ;; that shares the underlying hash table (mutations are reflected on obj).
+  (when (string= name "__dict__")
+    (let ((d (py-object-dict obj)))
+      (unless (hash-table-p d)
+        (setf (py-object-dict obj) (make-hash-table :test #'equal))
+        (setf d (py-object-dict obj)))
+      (return-from py-getattr (make-py-dict d))))
   ;; 1. Check class dict for data descriptors (priority over instance dict)
   (let ((cls (py-object-class obj)))
     (multiple-value-bind (val found) (%lookup-in-class-hierarchy cls name)
@@ -2774,9 +2790,20 @@
         exc-obj))
      ;; Normal class
      (t
-      (let ((instance (make-instance 'py-object
-                                     :py-class cls
-                                     :py-dict (make-hash-table :test #'equal))))
+      ;; Honour user-defined __new__ (Python data model §3.3.1):
+      ;; call cls.__new__(cls, *args) to obtain the instance, then
+      ;; call cls.__init__(instance, *args) if __new__ returned an
+      ;; instance of cls (or a subclass).
+      (let ((instance
+             (multiple-value-bind (new-fn new-found)
+                 (%lookup-in-class-hierarchy cls "__new__")
+               (if new-found
+                   ;; __new__ is an implicit staticmethod; call it
+                   ;; directly with cls as the first argument.
+                   (apply #'py-call new-fn cls args)
+                   (make-instance 'py-object
+                                  :py-class cls
+                                  :py-dict (make-hash-table :test #'equal))))))
         (multiple-value-bind (init-fn found)
             (%lookup-in-class-hierarchy cls "__init__")
           (when found

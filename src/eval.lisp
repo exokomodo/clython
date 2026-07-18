@@ -1437,6 +1437,19 @@
                           (t raw))))
                 (when (typep fn 'clython.runtime:py-function)
                   (clython.runtime:py-call fn cls)))))))
+      ;; Call __set_name__(owner, name) on any class-dict value that defines it.
+      ;; Python data model §3.3.2.1: called for each descriptor when the class
+      ;; is created, before __init_subclass__ and decorators.
+      (maphash
+       (lambda (attr-name attr-val)
+         (when (typep attr-val 'clython.runtime:py-object)
+           (let ((set-name-fn
+                  (clython.runtime::%lookup-dunder attr-val "__set_name__")))
+             (when set-name-fn
+               (ignore-errors
+                (clython.runtime:py-call set-name-fn attr-val cls
+                                         (clython.runtime:make-py-str attr-name)))))))
+       class-dict)
       ;; Apply decorators (in reverse order)
       (let ((decorated cls))
         (dolist (dec-node (reverse (clython.ast:class-def-node-decorator-list node)))
