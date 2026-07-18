@@ -532,7 +532,6 @@ print(a > b)
     assert out == "True\nTrue\nFalse"
 
 
-@pytest.mark.xfail(strict=False, reason="functools.total_ordering may not be implemented in Clython")
 def test_complete_comparison_implementation():
     """Test complete comparison method implementation."""
     source = """
@@ -678,7 +677,6 @@ print(c.bar)
     assert out == "missing:foo\n42"
 
 
-@pytest.mark.xfail(strict=False, reason="__dir__ override may not be implemented in Clython")
 def test_attribute_dir_method():
     """Test directory listing method."""
     source = """

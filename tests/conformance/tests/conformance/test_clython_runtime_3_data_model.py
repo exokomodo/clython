@@ -387,7 +387,6 @@ def test_object_values_and_mutability():
     assert out == "[1, 2, 3, 4]"
 
 
-@pytest.mark.xfail(strict=False, reason="dict keyword args (dict(a=1)) may not be supported in Clython")
 def test_builtin_types():
     """Test built-in type objects."""
     source = "print(int(3.7))\nprint(str(42))\nprint(list((1,2,3)))\nprint(dict(a=1))"
@@ -452,7 +451,6 @@ def test_callable_objects():
     assert out == "8"
 
 
-@pytest.mark.xfail(strict=False, reason="__getattr__ fallback may not be fully implemented in Clython")
 def test_attribute_access_methods():
     """Test attribute access customization methods."""
     source = "class C:\n    def __getattr__(self, name):\n        return f'attr:{name}'\nc = C()\nprint(c.foo)"
