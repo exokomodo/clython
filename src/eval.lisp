@@ -413,6 +413,23 @@
                        (clython.runtime:py-setitem d (clython.runtime:make-py-str k) v))
                      (clython.scope:env-bindings env))
             (return-from eval-node d)))
+        ;; dir() — return sorted list of names in current scope
+        (when (and (string= fname "dir")
+                   (null (clython.ast:call-node-args node)))
+          (let ((names nil))
+            ;; Collect all names from all scope levels
+            (loop with e = env
+                  while e do
+                  (maphash (lambda (k _v)
+                             (declare (ignore _v))
+                             (pushnew k names :test #'string=))
+                           (clython.scope:env-bindings e))
+                  (setf e (clython.scope:env-parent e)))
+            (let* ((sorted (sort names #'string<))
+                   (py-names (mapcar #'clython.runtime:make-py-str sorted)))
+              (return-from eval-node
+                (clython.runtime:make-py-list (coerce py-names 'vector)))))
+          (return-from eval-node (clython.runtime:make-py-list #())))
         ;; eval(expr_string[, globals[, locals]]) — parse and evaluate an expression
         (when (and (string= fname "eval")
                    (>= (length (clython.ast:call-node-args node)) 1))

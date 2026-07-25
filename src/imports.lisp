@@ -258,7 +258,10 @@
 (defun initialize-import-system ()
   "Initialize the import system. Call once at startup."
   (clrhash *module-registry*)
-  (register-builtin-modules))
+  (register-builtin-modules)
+  ;; Seed __main__ so sys.modules['__main__'] returns a module object
+  (setf (gethash "__main__" *module-registry*)
+        (clython.runtime:make-py-module "__main__")))
 
 ;; Auto-initialize when loaded
 (initialize-import-system)

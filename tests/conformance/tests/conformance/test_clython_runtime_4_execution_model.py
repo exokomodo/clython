@@ -605,7 +605,6 @@ def test_scope_ast_structure_consistency():
     assert out == "1\n2"
 
 
-@pytest.mark.xfail(strict=False, reason="sys.modules['__main__'] may not be available in Clython")
 def test_execution_model_introspection():
     """Test ability to analyze execution model programmatically."""
     source = """

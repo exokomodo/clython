@@ -501,7 +501,6 @@ def test_program_consistency():
     assert out == "15"
 
 
-@pytest.mark.xfail(strict=False, reason="dir() at module level may not be implemented in Clython")
 def test_program_introspection_capabilities():
     """Test program introspection capabilities."""
     source = "x = 42\nprint('x' in dir())"
