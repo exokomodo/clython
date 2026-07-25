@@ -308,7 +308,6 @@ asyncio.run(main())
     assert out == "36"
 
 
-@pytest.mark.xfail(reason="inspect.iscoroutinefunction not fully supported in Clython")
 def test_async_function_type():
     """Async function object is a coroutine function."""
     source = """\
