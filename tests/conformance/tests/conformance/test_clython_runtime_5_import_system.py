@@ -492,7 +492,6 @@ def test_package_structure_imports():
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="__init__.py module implications may not be fully implemented in Clython")
 def test_init_module_implications():
     """Test imports that would involve __init__.py behavior."""
     source = "import os\nprint(hasattr(os, '__file__'))"

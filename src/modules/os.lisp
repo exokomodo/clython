@@ -31,6 +31,9 @@
   (let ((mod (clython.runtime:make-py-module "os")))
     (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-str "os"))
+    ;; __file__ — CPython sets this to the .py path; stub with the module name
+    (setf (gethash "__file__" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str "os.py"))
     ;; os.path submodule
     (let ((path-mod (make-os-path-module)))
       (setf (gethash "path" (clython.runtime:py-module-dict mod)) path-mod)
