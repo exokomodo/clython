@@ -97,7 +97,6 @@ class TestStringModule:
         assert rc == 0
         assert out == "True"
 
-    @pytest.mark.xfail(strict=False, reason="string.Formatter not implemented in Clython")
     def test_formatter_format(self):
         out, _, rc = clython_run(
             "import string\nprint(string.Formatter().format('Hello {name}', name='world'))"
@@ -105,7 +104,6 @@ class TestStringModule:
         assert rc == 0
         assert out == "Hello world"
 
-    @pytest.mark.xfail(strict=False, reason="string.Template not implemented in Clython")
     def test_template_substitute(self):
         out, _, rc = clython_run("import string\nprint(string.Template('$x').substitute(x=42))")
         assert rc == 0
