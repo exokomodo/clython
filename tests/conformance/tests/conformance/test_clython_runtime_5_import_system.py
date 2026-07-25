@@ -185,7 +185,6 @@ print(result)
     assert out == "[1, 2, 3, 4, 5]"
 
 
-@pytest.mark.xfail(reason="Clython may not support importlib")
 def test_import_importlib():
     source = """
 import importlib
@@ -312,7 +311,6 @@ def test_from_import_with_aliases():
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="from dotted.module import may not be supported in Clython")
 def test_from_dotted_module_imports():
     """Test from...import with dotted module names."""
     source = "from os.path import sep\nprint(sep in ['/', '\\\\'])"
