@@ -1923,6 +1923,9 @@
   (let ((names '()))
     (loop
       (let ((dotted (parse-dotted-name ps)))
+        ;; A bare 'import' with no module name is a syntax error.
+        (when (and (null dotted) (null names))
+          (error "SyntaxError: Expected module name after 'import'"))
         (when (null dotted) (return))
         (let ((asname nil))
           (let ((as-tok (ps-token ps)))
@@ -1952,11 +1955,13 @@
             (return))
           (ps-advance ps)
           (let ((name (ps-token ps)))
+            ;; A trailing dot (e.g. 'import os.') is a syntax error.
             (unless (and name (eq (tok-type name) :name))
-              (return))
+              (error "SyntaxError: Invalid syntax — trailing '.' in dotted module name"))
             (ps-advance ps)
             (push (tok-value name) parts))))
       (format nil "~{~A~^.~}" (nreverse parts)))))
+
 
 (defrule parse-from-import-stmt
   (let ((tok (ps-token ps)))
