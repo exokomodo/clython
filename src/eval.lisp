@@ -960,6 +960,30 @@
 ;;; ─── Annotated assignment ──────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:ann-assign-node) env)
+  ;; Always record the annotation in __annotations__ (Python tracks these at
+  ;; class and module scope so that @dataclass and similar decorators can
+  ;; inspect them later).
+  (let* ((target (clython.ast:ann-assign-node-target node))
+         (ann-node (clython.ast:ann-assign-node-annotation node))
+         (ann-val  (when ann-node (eval-node ann-node env)))
+         (field-name
+           (cond
+             ((typep target 'clython.ast:name-node)
+              (clython.ast:name-node-id target))
+             (t nil))))
+    (when (and field-name ann-val)
+      ;; Get or create __annotations__ in the *local* binding frame.
+      (let ((ann-dict
+              (multiple-value-bind (existing found)
+                  (gethash "__annotations__" (clython.scope:env-bindings env))
+                (if found
+                    existing
+                    (let ((d (clython.runtime:make-py-dict)))
+                      (setf (gethash "__annotations__" (clython.scope:env-bindings env)) d)
+                      d)))))
+        (when (typep ann-dict 'clython.runtime:py-dict)
+          (setf (gethash field-name (clython.runtime:py-dict-value ann-dict)) ann-val)))))
+  ;; If there's a value, also perform the assignment.
   (when (clython.ast:ann-assign-node-value node)
     (let ((value (eval-node (clython.ast:ann-assign-node-value node) env)))
       (%assign-target (clython.ast:ann-assign-node-target node) value env)))
