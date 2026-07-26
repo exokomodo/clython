@@ -37,7 +37,9 @@
                                            (:file "random")
                                            (:file "copy")
                                            (:file "abc")
-                                           (:file "dataclasses")))
+                                           (:file "dataclasses")
+                                           (:file "gc")
+                                           (:file "types")))
 
                              (:file "imports")
                              (:file "eval")
