@@ -386,10 +386,13 @@
         (when (and (string= fname "super")
                    (null (clython.ast:call-node-args node)))
           (let* ((implicit-cls (ignore-errors (clython.scope:env-get "__class__" env)))
-                 ;; Normal methods use "self"; classmethods and __init_subclass__
-                 ;; use "cls" as the first parameter name.
+                 ;; Try common first-parameter names used for the instance/class.
+                 ;; In metaclass __new__ methods "mcs" or "mcls" are conventional.
                  (self-or-cls (or (ignore-errors (clython.scope:env-get "self" env))
-                                  (ignore-errors (clython.scope:env-get "cls" env)))))
+                                  (ignore-errors (clython.scope:env-get "cls" env))
+                                  (ignore-errors (clython.scope:env-get "mcs" env))
+                                  (ignore-errors (clython.scope:env-get "mcls" env))
+                                  (ignore-errors (clython.scope:env-get "klass" env)))))
             (when (and implicit-cls self-or-cls)
               (return-from eval-node
                 (make-instance 'clython.runtime:py-super :type implicit-cls :obj self-or-cls)))))
@@ -1386,6 +1389,12 @@
          (bases (if explicit-bases explicit-bases
                     (let ((obj-type (clython.scope:env-get "object" env)))
                       (if obj-type (list obj-type) nil))))
+         ;; Extract metaclass= keyword argument if present
+         (metaclass-kw
+          (dolist (kw (clython.ast:class-def-node-keywords node))
+            (when (and (typep kw 'clython.ast:py-keyword)
+                       (string= (clython.ast:keyword-arg kw) "metaclass"))
+              (return (eval-node (clython.ast:keyword-value kw) env)))))
          (class-env (clython.scope:env-extend env))
          (class-dict (make-hash-table :test #'equal)))
     ;; Execute class body in class scope
@@ -1409,8 +1418,14 @@
                            k)))
                  (setf (gethash mangled class-dict) v)))
              (clython.scope:env-bindings class-env))
-    ;; Create the type object
-    (let ((cls (clython.runtime:make-py-type :name name :bases bases :tdict class-dict)))
+    ;; Create the type object, calling metaclass(name, bases, ns) if a metaclass was given
+    (let ((cls (if metaclass-kw
+                   (let ((ns-dict (clython.runtime:make-py-dict class-dict)))
+                       (clython.runtime:py-call metaclass-kw
+                         (clython.runtime:make-py-str name)
+                         (clython.runtime:make-py-list bases)
+                         ns-dict))
+                   (clython.runtime:make-py-type :name name :bases bases :tdict class-dict))))
       ;; Inject __class__ into each method's closure for super() support
       (maphash (lambda (k v)
                  (declare (ignore k))

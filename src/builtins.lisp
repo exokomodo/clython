@@ -245,12 +245,40 @@
             (bases-obj (second args))
             (dict-obj (third args))
             (name (py-str-value name-obj))
-            (bases (coerce (py-tuple-value bases-obj) 'list))
+            (bases (if (typep bases-obj 'py-list)
+                       (coerce (py-list-value bases-obj) 'list)
+                       (coerce (py-tuple-value bases-obj) 'list)))
             (tdict (make-hash-table :test #'equal)))
-       ;; Copy dict entries
-       (maphash (lambda (k v)
-                  (setf (gethash k tdict) v))
-                (py-dict-value dict-obj))
+       ;; Copy dict entries — accept either py-dict or py-object
+       (cond
+         ((typep dict-obj 'py-dict)
+          (maphash (lambda (k v) (setf (gethash k tdict) v))
+                   (py-dict-value dict-obj)))
+         ((typep dict-obj 'py-object)
+          (when (py-object-dict dict-obj)
+            (maphash (lambda (k v) (setf (gethash k tdict) v))
+                     (py-object-dict dict-obj)))))
+       (make-py-type :name name :bases bases :tdict tdict)))
+    ;; type.__new__(metacls, name, bases, dict) — 4-arg form from super().__new__
+    ;; When cl-fn is (lambda (metacls &rest args) ...), metacls is already bound;
+    ;; args here is the list AFTER metacls, so (first args)=name, (second)=bases, (third)=dict.
+    ((= (length args) 4)
+     (let* ((name-obj (second args))   ; args[0]=metacls already bound, args[1]=name
+            (bases-obj (third args))
+            (dict-obj (fourth args))
+            (name (py-str-value name-obj))
+            (bases (if (typep bases-obj 'py-list)
+                       (coerce (py-list-value bases-obj) 'list)
+                       (coerce (py-tuple-value bases-obj) 'list)))
+            (tdict (make-hash-table :test #'equal)))
+       (cond
+         ((typep dict-obj 'py-dict)
+          (maphash (lambda (k v) (setf (gethash k tdict) v))
+                   (py-dict-value dict-obj)))
+         ((typep dict-obj 'py-object)
+          (when (py-object-dict dict-obj)
+            (maphash (lambda (k v) (setf (gethash k tdict) v))
+                     (py-object-dict dict-obj)))))
        (make-py-type :name name :bases bases :tdict tdict)))
     (t (py-raise "TypeError" "type() takes 1 or 3 arguments"))))
 
@@ -928,6 +956,49 @@
                    (clython.runtime:py-type-dict obj-type))
           (make-instance 'clython.runtime:py-classmethod-wrapper
                          :function noop-fn))))
+
+;; Add __new__ to *type-type* so that super().__new__ works in metaclasses.
+;; type.__new__(cls, name, bases, ns) creates a new class from the namespace dict.
+(when *type-type*
+  (unless (clython.runtime:py-type-dict *type-type*)
+    (setf (clython.runtime:py-type-dict *type-type*)
+          (make-hash-table :test #'equal)))
+  (setf (gethash "__new__" (clython.runtime:py-type-dict *type-type*))
+        (clython.runtime:make-py-function
+         :name "__new__"
+         :cl-fn (lambda (metacls &rest args)
+                  ;; Called either:
+                  ;;   Direct: type.__new__(metacls, name, bases, dict) -> args=(name bases dict)
+                  ;;   Via super() bound method: self=Meta prepended, explicit args=(mcs name bases dict)
+                  ;;   -> args=(mcs name bases dict), so name=(second args)
+                  ;; Distinguish by checking if (first args) is a py-type (the explicit metacls).
+                  (declare (ignore metacls))
+                  (let* ((name-obj  (if (and args (typep (first args) 'clython.runtime:py-type))
+                                        (second args)
+                                        (first args)))
+                         (bases-obj (if (and args (typep (first args) 'clython.runtime:py-type))
+                                        (third args)
+                                        (second args)))
+                         (dict-obj  (if (and args (typep (first args) 'clython.runtime:py-type))
+                                        (fourth args)
+                                        (third args)))
+                         (name (clython.runtime:py-str-value name-obj))
+                         (bases (cond
+                                  ((typep bases-obj 'clython.runtime:py-list)
+                                   (coerce (clython.runtime:py-list-value bases-obj) 'list))
+                                  ((typep bases-obj 'clython.runtime:py-tuple)
+                                   (coerce (clython.runtime:py-tuple-value bases-obj) 'list))
+                                  (t nil)))
+                         (tdict (make-hash-table :test #'equal)))
+                    (cond
+                      ((typep dict-obj 'clython.runtime:py-dict)
+                       (maphash (lambda (k v) (setf (gethash k tdict) v))
+                                (clython.runtime:py-dict-value dict-obj)))
+                      ((typep dict-obj 'clython.runtime:py-object)
+                       (when (clython.runtime:py-object-dict dict-obj)
+                         (maphash (lambda (k v) (setf (gethash k tdict) v))
+                                  (clython.runtime:py-object-dict dict-obj)))))
+                    (clython.runtime:make-py-type :name name :bases bases :tdict tdict))))))
 
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Exception classes — registered as callable py-type objects in *builtins*
