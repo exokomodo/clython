@@ -729,7 +729,6 @@ print(c is not c2)
     assert out == "42\n42\nTrue"
 
 
-@pytest.mark.xfail(strict=False, reason="pickle protocol may not be fully implemented in Clython")
 def test_pickle_methods():
     """Test pickle protocol methods."""
     source = """

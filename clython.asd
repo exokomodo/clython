@@ -40,7 +40,10 @@
                                            (:file "dataclasses")
                                            (:file "gc")
                                            (:file "types")
-                                           (:file "inspect")))
+                                           (:file "inspect")
+                                           (:file "weakref")
+                                           (:file "copyreg")
+                                           (:file "pickle")))
 
                              (:file "imports")
                              (:file "eval")

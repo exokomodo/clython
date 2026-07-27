@@ -349,7 +349,6 @@ print(len(s))
     assert out == "7"
 
 
-@pytest.mark.xfail(reason="Clython weakref may not be implemented")
 def test_weakref():
     source = """
 import weakref

@@ -1253,15 +1253,18 @@
          (params (clython.ast:async-function-def-node-args node))
          (body (%sort-body (clython.ast:async-function-def-node-body node)))
          (evaled-params (%eval-defaults params env))
+         ;; async def with yield inside = async generator function
+         (is-async-gen (%ast-contains-yield-p body))
          (func (clython.runtime:make-py-function
                 :name name
                 :params evaled-params
                 :body body
                 :env env
                 :async-p t
+                :generator is-async-gen
                 :cl-fn (lambda (&rest args)
                          (%call-user-function-from-cl-fn
-                          evaled-params body env args nil t)))))
+                          evaled-params body env args is-async-gen t)))))
     ;; Apply decorators (in reverse order)
     (let ((decorated func))
       (dolist (dec-node (reverse (clython.ast:async-function-def-node-decorator-list node)))
@@ -1674,7 +1677,10 @@
         (dolist (dec-node (reverse (clython.ast:class-def-node-decorator-list node)))
           (let ((dec-fn (eval-node dec-node env)))
             (setf decorated (clython.runtime:py-call dec-fn decorated))))
-        (clython.scope:env-set name decorated env)))
+        (clython.scope:env-set name decorated env)
+        ;; Register class in global registry for pickle / reflection
+        (when (typep decorated 'clython.runtime:py-type)
+          (clython.runtime:register-py-class name decorated))))
     clython.runtime:+py-none+))
 
 ;;; ─── Pass / Break / Continue ────────────────────────────────────────────────

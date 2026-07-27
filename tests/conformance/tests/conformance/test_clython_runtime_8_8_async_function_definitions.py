@@ -180,7 +180,6 @@ def test_async_with_statement():
     assert out == "42"
 
 
-@pytest.mark.xfail(reason="async for with async generators not yet supported in Clython")
 def test_async_for_statement():
     """async for over async generator"""
     out, err, rc = clython_run(

@@ -11,12 +11,13 @@
     (let ((d (clython.runtime:py-module-dict mod)))
       (setf (gethash "__name__" d) (clython.runtime:make-py-str "gc"))
 
-      ;; gc.collect([generation]) — no-op; returns 0 objects collected
+      ;; gc.collect([generation]) — trigger SBCL full GC; returns 0
       (setf (gethash "collect" d)
             (clython.runtime:make-py-function
              :name "collect"
              :cl-fn (lambda (&rest _)
                       (declare (ignore _))
+                      (sb-ext:gc :full t)
                       (clython.runtime:make-py-int 0))))
 
       ;; gc.isenabled() — Clython has no GC toggle; always return True
