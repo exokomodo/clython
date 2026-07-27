@@ -62,6 +62,35 @@
                                       c))
                                 coros)))))
            :async-p t))
+    ;; asyncio.create_task(coro) — wrap a coroutine in a Task-like object
+    ;; In our synchronous model this just runs the coroutine immediately and
+    ;; wraps the result in a done Task so `await task` returns the value.
+    (setf (gethash "create_task" d)
+          (clython.runtime:make-py-function
+           :name "create_task"
+           :cl-fn (lambda (coro &rest _)
+                    (declare (ignore _))
+                    ;; Run the coroutine now, stash result in a Task
+                    (let* ((result (if (typep coro 'clython.runtime:py-coroutine)
+                                      (clython.runtime:py-coroutine-run coro)
+                                      coro))
+                           (task (clython.runtime:make-py-coroutine
+                                  (lambda () result))))
+                      ;; Pre-mark as done so repeated await returns the cached result
+                      (setf (clython.runtime:py-coroutine-finished task) t)
+                      (setf (clython.runtime:py-coroutine-result task) result)
+                      task))))
+    ;; asyncio.get_event_loop() — stub returning a minimal loop object
+    (setf (gethash "get_event_loop" d)
+          (clython.runtime:make-py-function
+           :name "get_event_loop"
+           :cl-fn (lambda (&rest _) (declare (ignore _)) clython.runtime:+py-none+)))
+    ;; asyncio.ensure_future(coro) — alias for create_task
+    (let ((ct-fn (gethash "create_task" d)))
+      (setf (gethash "ensure_future" d) ct-fn))
+    ;; asyncio.Task class stub
+    (setf (gethash "Task" d)
+          (clython.runtime:make-py-type :name "Task"))
     ;; Module metadata
     (setf (gethash "__name__" d) (clython.runtime:make-py-str "asyncio"))
     mod))
