@@ -292,7 +292,6 @@ class TestTypeStatementForwardReferences:
 class TestTypeStatementRecursiveAliases:
     """Concept 12 – self-referential / recursive type alias definitions."""
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_json_value(self):
         out, err, rc = clython_run(
             "type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]\n"
@@ -300,7 +299,6 @@ class TestTypeStatementRecursiveAliases:
         )
         assert rc == 0
 
-    @pytest.mark.xfail(reason="Union/complex type expressions not yet supported in Clython")
     def test_recursive_generic(self):
         out, err, rc = clython_run(
             "type Tree[T] = T | dict[str, Tree[T]]\n"
