@@ -35,7 +35,8 @@
                                            (:file "contextlib")
                                            (:file "io")
                                            (:file "random")
-                                           (:file "copy")))
+                                           (:file "copy")
+                                           (:file "abc")))
 
                              (:file "imports")
                              (:file "eval")

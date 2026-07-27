@@ -345,6 +345,29 @@
          ;; Check user-defined class hierarchy
          (and (typep subtype 'py-type)
               (%is-subtype-p subtype supertype))
+         ;; Check ABC virtual subclassing via _abc_registry
+         (and (typep supertype 'py-type)
+              (let ((reg (gethash "_abc_registry" (py-type-dict supertype))))
+                (and reg (typep reg 'clython.runtime:py-list)
+                     (some (lambda (r) (equal r subtype))
+                           (coerce (clython.runtime:py-list-value reg) 'list)))))
+         ;; Check __subclasshook__ on supertype (classmethod)
+         (and (typep supertype 'py-type)
+              (handler-case
+                  (multiple-value-bind (hook found)
+                      (clython.runtime::%lookup-in-class-hierarchy supertype "__subclasshook__")
+                    (when found
+                      (let* ((fn (cond
+                                   ((typep hook 'clython.runtime:py-classmethod-wrapper)
+                                    (clython.runtime:py-classmethod-function hook))
+                                   ((typep hook 'clython.runtime:py-method)
+                                    (clython.runtime:py-method-function hook))
+                                   (t hook)))
+                             (result (clython.runtime:py-call fn supertype subtype)))
+                        ;; NotImplemented (None in Clython) → fall through
+                        (and (not (eq result clython.runtime:+py-none+))
+                             (clython.runtime:py-bool-val result)))))
+                (error () nil)))
          ;; Check built-in exception hierarchy
          (clython.runtime:exception-is-subclass-p sub-name super-name)
          ;; Check built-in type hierarchy

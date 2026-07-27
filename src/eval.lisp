@@ -1360,6 +1360,62 @@
               (error exc))))
         clython.runtime:+py-none+)))
 
+(defun %abc-aware-p (base)
+  "Return true if BASE is an ABC-aware class (has __is_abc__ or __abstractmethods__)."
+  (and (typep base 'clython.runtime:py-type)
+       (let ((d (clython.runtime:py-type-dict base)))
+         (or (gethash "__is_abc__" d)
+             (gethash "__abstractmethods__" d)))))
+
+(defun %maybe-set-abstract-methods (cls bases class-dict)
+  "If any base is ABC-aware or any method is abstract, compute and set
+   __abstractmethods__ on CLS."
+  ;; Collect abstract names from bases (inherited but not overridden)
+  (let ((inherited (make-hash-table :test #'equal)))
+    (dolist (base bases)
+      (when (typep base 'clython.runtime:py-type)
+        (let ((abs-set (gethash "__abstractmethods__"
+                                (clython.runtime:py-type-dict base))))
+          (when (typep abs-set 'clython.runtime:py-set)
+            (maphash (lambda (k v) (declare (ignore v))
+                       (setf (gethash k inherited) t))
+                     (clython.runtime:py-set-value abs-set))))))
+    ;; Remove inherited abstracts that are concretely implemented in class-dict
+    (maphash (lambda (k v)
+               (if (and (typep v 'clython.runtime:py-function)
+                        (let ((flag (handler-case
+                                       (clython.runtime:py-getattr v "__isabstractmethod__")
+                                       (error () nil))))
+                          (and flag (clython.runtime:py-bool-val flag))))
+                   (setf (gethash k inherited) t)   ; still abstract
+                   (remhash k inherited)))            ; concrete override
+             class-dict)
+    ;; Build __abstractmethods__ set
+    (let ((abstract-names nil))
+      (maphash (lambda (k _) (push k abstract-names)) inherited)
+      (when (or abstract-names
+                (some #'%abc-aware-p bases))
+        (setf (gethash "__abstractmethods__" (clython.runtime:py-type-dict cls))
+              (clython.runtime:make-py-set abstract-names))
+        ;; Create a fresh register() with a closure capturing this class
+        (unless (gethash "register" (clython.runtime:py-type-dict cls))
+          (when (some #'%abc-aware-p bases)
+            (setf (gethash "_abc_registry" (clython.runtime:py-type-dict cls))
+                  (clython.runtime:make-py-list nil))
+            (let ((captured cls))
+              (setf (gethash "register" (clython.runtime:py-type-dict cls))
+                    (clython.runtime:make-py-function
+                     :name "register"
+                     :cl-fn (lambda (subclass &rest _)
+                              (declare (ignore _))
+                              (let ((reg (gethash "_abc_registry"
+                                                  (clython.runtime:py-type-dict captured))))
+                                (when (typep reg 'clython.runtime:py-list)
+                                  (vector-push-extend
+                                   subclass
+                                   (clython.runtime:py-list-value reg))))
+                              subclass))))))))))
+
 (defun %maybe-register-exception-class (name bases)
   "If any base class is in the exception hierarchy, register NAME as an exception subclass."
   (dolist (base bases)
@@ -1421,6 +1477,8 @@
                class-dict)
       ;; Register in exception hierarchy if any base is an exception class
       (%maybe-register-exception-class name bases)
+      ;; Compute __abstractmethods__ if any base is ABC-aware or has abstract methods
+      (%maybe-set-abstract-methods cls bases class-dict)
       ;; Fire __init_subclass__ on each base for the new subclass.
       ;; __init_subclass__ is implicitly a classmethod; we unwrap the wrapper
       ;; and call the underlying function with the new class as first arg.

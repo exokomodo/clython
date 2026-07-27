@@ -2790,6 +2790,20 @@
         exc-obj))
      ;; Normal class
      (t
+      ;; Check __abstractmethods__ before instantiation (ABC support)
+      (let ((abstract-set (gethash "__abstractmethods__" (py-type-dict cls))))
+        (when (and abstract-set
+                   (typep abstract-set 'py-set)
+                   (> (hash-table-count (py-set-value abstract-set)) 0))
+          (let ((first-abstract nil))
+            (maphash (lambda (k _) (declare (ignore _))
+                       (unless first-abstract (setf first-abstract k)))
+                     (py-set-value abstract-set))
+            (py-raise "TypeError"
+              "Can't instantiate abstract class ~A with abstract method~A ~A"
+              name
+              (if (> (hash-table-count (py-set-value abstract-set)) 1) "s" "")
+              first-abstract))))
       ;; Honour user-defined __new__ (Python data model §3.3.1):
       ;; call cls.__new__(cls, *args) to obtain the instance, then
       ;; call cls.__init__(instance, *args) if __new__ returned an

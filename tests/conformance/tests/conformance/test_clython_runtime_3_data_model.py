@@ -299,7 +299,6 @@ print(mro_names)
     assert out == "['D', 'B', 'C', 'A', 'object']"
 
 
-@pytest.mark.xfail(reason="Clython ABC module may not be implemented")
 def test_abstract_base_class():
     source = """
 from abc import ABC, abstractmethod
@@ -607,7 +606,6 @@ print(sorted(Base.subclasses))
     assert out == "['A', 'B']"
 
 
-@pytest.mark.xfail(strict=False, reason="ABC/abstractmethod may not be fully implemented in Clython")
 def test_abc_protocol():
     """Test ABC protocol with abstractmethod."""
     source = """
@@ -625,7 +623,6 @@ print(c.area())
     assert out == "3.14"
 
 
-@pytest.mark.xfail(strict=False, reason="ABC virtual subclassing may not be implemented in Clython")
 def test_virtual_subclassing():
     """Test virtual subclassing with register()."""
     source = """
@@ -640,7 +637,6 @@ print(issubclass(C, MyABC))
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="ABC subclasshook may not be implemented in Clython")
 def test_subclasshook():
     """Test __subclasshook__ for duck typing."""
     source = """
