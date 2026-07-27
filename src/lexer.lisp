@@ -136,14 +136,15 @@
 
 (defun identifier-start-p (ch)
   "True if CH can begin a Python identifier (letter or underscore)."
-  (and ch (or (alpha-char-p ch) (char= ch #\_)
-              ;; Accept non-ASCII for full Unicode ident support
-              (> (char-code ch) 127))))
+  ;; alpha-char-p covers ASCII and Unicode letters (via SBCL's Unicode tables)
+  ;; but correctly rejects emoji/symbols in supplementary Unicode planes."
+  (and ch (or (alpha-char-p ch) (char= ch #\_))))
 
 (defun identifier-continue-p (ch)
   "True if CH can continue a Python identifier."
-  (and ch (or (alphanumericp ch) (char= ch #\_)
-              (> (char-code ch) 127))))
+  ;; alphanumericp handles ASCII alphanumeric; alpha-char-p catches non-ASCII
+  ;; Unicode letters (Greek, Cyrillic, CJK, etc.) without accepting emoji.
+  (and ch (or (alphanumericp ch) (char= ch #\_ ) (alpha-char-p ch))))
 
 (defun digit-p (ch &optional (radix 10))
   (and ch (digit-char-p ch radix)))

@@ -359,7 +359,6 @@ def test_invalid_identifier_syntax_errors():
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Clython may accept emoji/invalid Unicode identifiers without erroring")
 def test_invalid_unicode_identifiers():
     """Test invalid Unicode characters in identifiers."""
     # Emoji are not valid identifiers
