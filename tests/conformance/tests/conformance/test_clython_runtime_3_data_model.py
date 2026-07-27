@@ -696,7 +696,6 @@ asyncio.run(main())
     assert out == "42"
 
 
-@pytest.mark.xfail(strict=False, reason="Coroutine functions may not be fully implemented in Clython")
 def test_coroutine_function_protocol():
     """Test coroutine function creation."""
     source = """
