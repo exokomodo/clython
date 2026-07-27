@@ -393,14 +393,12 @@ def test_import_ast_structure_consistency():
     assert out == "module\nTrue"
 
 
-@pytest.mark.xfail(strict=False, reason="Clython may not reject bare 'import' without module name")
 def test_invalid_import_syntax():
     """Test invalid import statement syntax."""
     _, _, rc = clython_run("import")
     assert rc != 0
 
 
-@pytest.mark.xfail(strict=False, reason="Clython may not reject 'import os.' with trailing dot")
 def test_invalid_dotted_name_syntax():
     """Test invalid dotted name syntax."""
     _, _, rc = clython_run("import os.")
