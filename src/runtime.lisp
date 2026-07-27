@@ -433,8 +433,10 @@
           (return-from py-getattr
             (cond
               ((typep val 'py-function)
-               ;; Regular method — bind to self/cls
-               (make-instance 'py-method :function val :self self-or-cls))
+               ;; __new__ is an implicit staticmethod; never auto-bind self
+               (if (string= name "__new__")
+                   val
+                   (make-instance 'py-method :function val :self self-or-cls)))
               ((typep val 'py-classmethod-wrapper)
                ;; Classmethod — bind the inner function to the class
                (let ((fn  (py-classmethod-function val))

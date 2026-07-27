@@ -245,7 +245,6 @@ print(type(obj).__name__)
     assert out == "hello\nMyType"
 
 
-@pytest.mark.xfail(reason="Clython metaclass support may be incomplete")
 def test_metaclass():
     source = """
 class Meta(type):
@@ -489,7 +488,6 @@ print('after')
     assert out == "in context\nafter"
 
 
-@pytest.mark.xfail(strict=False, reason="metaclass= keyword argument in class definitions may not be supported in Clython")
 def test_metaclass_basics():
     """Test basic metaclass functionality."""
     source = """

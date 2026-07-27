@@ -389,7 +389,10 @@
                  ;; Normal methods use "self"; classmethods and __init_subclass__
                  ;; use "cls" as the first parameter name.
                  (self-or-cls (or (ignore-errors (clython.scope:env-get "self" env))
-                                  (ignore-errors (clython.scope:env-get "cls" env)))))
+                                  (ignore-errors (clython.scope:env-get "cls" env))
+                                  ;; metaclass __new__ uses mcs as first arg
+                                  (ignore-errors (clython.scope:env-get "mcs" env)))))
+
             (when (and implicit-cls self-or-cls)
               (return-from eval-node
                 (make-instance 'clython.runtime:py-super :type implicit-cls :obj self-or-cls)))))
@@ -1465,8 +1468,48 @@
                            k)))
                  (setf (gethash mangled class-dict) v)))
              (clython.scope:env-bindings class-env))
-    ;; Create the type object
-    (let ((cls (clython.runtime:make-py-type :name name :bases bases :tdict class-dict)))
+    ;; Extract metaclass= keyword argument if present
+    (let* ((kw-metaclass
+             (some (lambda (kw)
+                     (when (string= (clython.ast:keyword-arg kw) "metaclass")
+                       kw))
+                   (clython.ast:class-def-node-keywords node)))
+           (explicit-metaclass
+             (when kw-metaclass
+               (eval-node (clython.ast:keyword-value kw-metaclass) env)))
+           (cls
+             (if (and explicit-metaclass
+                      (typep explicit-metaclass 'clython.runtime:py-type))
+                 ;; Call metaclass.__new__(metaclass, name, bases, dict)
+                 (handler-case
+                     (let* ((meta-new (clython.runtime:py-getattr
+                                       explicit-metaclass "__new__"))
+                            (py-name  (clython.runtime:make-py-str name))
+                            (py-bases (clython.runtime:make-py-tuple bases))
+                            (py-dict  (let ((d (clython.runtime:make-py-dict)))
+                                        (maphash (lambda (k v)
+                                                   (clython.runtime:py-setitem
+                                                    d
+                                                    (clython.runtime:make-py-str k)
+                                                    v))
+                                                 class-dict)
+                                        d))
+                            (result (clython.runtime:py-call
+                                     meta-new explicit-metaclass
+                                     py-name py-bases py-dict)))
+                       (or result
+                           (clython.runtime:make-py-type :name name
+                                                         :bases bases
+                                                         :tdict class-dict)))
+                   (error (e)
+                     (format t "metaclass __new__ error: ~A~%" e)
+                     (clython.runtime:make-py-type :name name
+                                                   :bases bases
+                                                   :tdict class-dict)))
+                 ;; Normal class creation
+                 (clython.runtime:make-py-type :name name
+                                               :bases bases
+                                               :tdict class-dict))))
       ;; Inject __class__ into each method's closure for super() support
       (maphash (lambda (k v)
                  (declare (ignore k))
