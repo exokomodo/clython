@@ -283,7 +283,6 @@ def test_class_many_methods():
     assert out == "0 5 9"
 
 
-@pytest.mark.xfail(reason="dataclasses module not yet supported in Clython")
 def test_dataclass_decorator():
     """@dataclass works (requires dataclasses module)"""
     out, err, rc = clython_run(

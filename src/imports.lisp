@@ -124,6 +124,7 @@
   (setf (gethash "random" *builtin-modules*) #'make-random-module)
   (setf (gethash "copy" *builtin-modules*) #'make-copy-module)
   (setf (gethash "abc" *builtin-modules*) #'make-abc-module)
+  (setf (gethash "dataclasses" *builtin-modules*) #'make-dataclasses-module)
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
   (setf (gethash "re" *builtin-modules*) #'make-re-module)
   (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"
@@ -131,7 +132,7 @@
                   "stat" "posix" "errno" "heapq" "reprlib"
                   "numbers" "codecs" "copyreg" "operator" "threading" "enum"
                   "_sre" "sre_compile" "sre_parse" "sre_constants" "random"
-                  "importlib" "dataclasses" "subprocess" "inspect"
+                  "importlib" "subprocess" "inspect"
                   "contextlib" "weakref" "ntpath" "genericpath"
                   "_imp" "signal" "token" "tokenize"))
     (unless (gethash name *builtin-modules*)
