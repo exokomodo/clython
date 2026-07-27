@@ -39,7 +39,8 @@
                                            (:file "abc")
                                            (:file "dataclasses")
                                            (:file "gc")
-                                           (:file "types")))
+                                           (:file "types")
+                                           (:file "inspect")))
 
                              (:file "imports")
                              (:file "eval")
