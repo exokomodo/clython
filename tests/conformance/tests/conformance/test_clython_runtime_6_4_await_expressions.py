@@ -324,7 +324,6 @@ print(inspect.iscoroutinefunction(my_coro))
     assert out == "True"
 
 
-@pytest.mark.xfail(reason="asyncio.create_task not yet supported in Clython")
 def test_await_asyncio_create_task():
     """asyncio.create_task with await works."""
     source = """\
