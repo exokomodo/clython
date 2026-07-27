@@ -1985,7 +1985,9 @@
 ;;; ─── Type alias (stub) ─────────────────────────────────────────────────────
 
 (defmethod eval-node ((node clython.ast:type-alias-node) env)
-  ;; PEP 695 type alias — bind type params as TypeVar stubs, eval value, bind name
+  ;; PEP 695 type alias — bind type params as TypeVar stubs, eval value, bind name.
+  ;; Recursive aliases (e.g. type JsonValue = str | list[JsonValue]) need a placeholder
+  ;; bound before the RHS is evaluated so self-references don't NameError.
   (let* ((name (clython.ast:type-alias-node-name node))
          (type-params (clython.ast:type-alias-node-type-params node))
          ;; Create a child scope so type param bindings don't leak
@@ -1993,7 +1995,13 @@
     ;; Bind each type param as a string placeholder (acts as a TypeVar name)
     (dolist (tp type-params)
       (clython.scope:env-set tp (clython.runtime:make-py-str tp) inner-env))
-    (let ((value (eval-node (clython.ast:type-alias-node-value node) inner-env)))
+    ;; Pre-bind the alias name as a placeholder so recursive references resolve
+    (clython.scope:env-set name (clython.runtime:make-py-str name) env)
+    (let ((value (handler-case
+                     (eval-node (clython.ast:type-alias-node-value node) inner-env)
+                   (error ()
+                     ;; Recursive alias or forward-ref failed — leave placeholder
+                     (clython.runtime:make-py-str name)))))
       (clython.scope:env-set name value env)
       clython.runtime:+py-none+)))
 
