@@ -437,7 +437,6 @@ class TestTypeStatementUsedInAnnotations:
 class TestTypeStatementIntrospection:
     """Concept 18 – ability to introspect / enumerate type aliases at runtime."""
 
-    @pytest.mark.xfail(reason="Not yet supported in Clython")
     def test_alias_in_namespace(self):
         out, err, rc = clython_run(
             "type MyAlias = int\n"
