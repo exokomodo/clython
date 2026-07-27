@@ -1125,6 +1125,82 @@
                      (stringp (clython.ast:constant-node-value val)))
             (%unquote-string (clython.ast:constant-node-value val))))))))
 
+(defun %collect-assigned-names (body)
+  "Return a hash-set of names assigned at this scope level in BODY.
+   Does NOT recurse into nested function bodies."
+  (let ((names (make-hash-table :test #'equal)))
+    (labels ((collect-target (target)
+               (cond
+                 ((typep target 'clython.ast:name-node)
+                  (setf (gethash (clython.ast:name-node-id target) names) t))
+                 ((typep target 'clython.ast:tuple-node)
+                  (dolist (elt (clython.ast:tuple-node-elts target))
+                    (collect-target elt)))
+                 ((typep target 'clython.ast:list-node)
+                  (dolist (elt (clython.ast:list-node-elts target))
+                    (collect-target elt))))))
+      (dolist (stmt body)
+        (cond
+          ((typep stmt 'clython.ast:assign-node)
+           (dolist (tgt (clython.ast:assign-node-targets stmt))
+             (collect-target tgt)))
+          ((typep stmt 'clython.ast:aug-assign-node)
+           (collect-target (clython.ast:aug-assign-node-target stmt)))
+          ((typep stmt 'clython.ast:for-node)
+           (collect-target (clython.ast:for-node-target stmt)))
+          ((typep stmt 'clython.ast:function-def-node)
+           (setf (gethash (clython.ast:function-def-node-name stmt) names) t))
+          ((typep stmt 'clython.ast:async-function-def-node)
+           (setf (gethash (clython.ast:async-function-def-node-name stmt) names) t))
+          ((typep stmt 'clython.ast:class-def-node)
+           (setf (gethash (clython.ast:class-def-node-name stmt) names) t))
+          ((typep stmt 'clython.ast:import-node)
+           (dolist (alias (clython.ast:import-node-names stmt))
+             (setf (gethash (or (clython.ast:alias-asname alias)
+                                (clython.ast:alias-name alias))
+                            names) t)))
+          ((typep stmt 'clython.ast:import-from-node)
+           (dolist (alias (clython.ast:import-from-node-names stmt))
+             (setf (gethash (or (clython.ast:alias-asname alias)
+                                (clython.ast:alias-name alias))
+                            names) t)))))
+      names)))
+
+(defun %find-nonlocal-names-in-body (body)
+  "Return a list of names declared nonlocal in BODY (shallow)."
+  (let ((result nil))
+    (dolist (stmt body result)
+      (when (typep stmt 'clython.ast:nonlocal-node)
+        (dolist (vname (clython.ast:nonlocal-node-names stmt))
+          (push vname result))))))
+
+(defun %scan-body-for-nested-nonlocals (body enclosing-env)
+  "Walk BODY for nested function defs with nonlocal declarations.
+   A nonlocal name is valid if it appears in the outer body assigned names
+   (will become a local) OR in an already-bound enclosing scope.
+   Raises SyntaxError otherwise, matching CPython compile-time behaviour."
+  (let ((outer-locals (%collect-assigned-names body)))
+    (dolist (stmt body)
+      (when (or (typep stmt 'clython.ast:function-def-node)
+                (typep stmt 'clython.ast:async-function-def-node))
+        (let* ((nested-body (if (typep stmt 'clython.ast:function-def-node)
+                                (clython.ast:function-def-node-body stmt)
+                                (clython.ast:async-function-def-node-body stmt)))
+               (nonlocal-names (%find-nonlocal-names-in-body nested-body)))
+          (dolist (vname nonlocal-names)
+            (unless (gethash vname outer-locals)
+              (let ((found nil)
+                    (e enclosing-env))
+                (loop while (and e (clython.scope:env-parent e))
+                      do (multiple-value-bind (val exists)
+                             (gethash vname (clython.scope:env-bindings e))
+                           (declare (ignore val))
+                           (when exists (setf found t) (return)))
+                         (setf e (clython.scope:env-parent e)))
+                (unless found
+                  (clython.runtime:py-raise "SyntaxError"
+                    "no binding for nonlocal '~A' found in enclosing scope"
+                    vname))))))))))
 (defmethod eval-node ((node clython.ast:function-def-node) env)
   (let* ((name (clython.ast:function-def-node-name node))
          (params (clython.ast:function-def-node-args node))
@@ -1133,6 +1209,9 @@
          ;; Evaluate default values now (at definition time)
          (evaled-params (%eval-defaults params env))
          (is-generator (%ast-contains-yield-p body))
+         ;; Validate nonlocal declarations in immediately-nested functions
+         ;; at definition time to approximate CPython's compile-time SyntaxError.
+         (_ (%scan-body-for-nested-nonlocals body env))
          (func (clython.runtime:make-py-function
                 :name name
                 :params evaled-params
@@ -1860,11 +1939,25 @@
 
 ;;; ─── Delete ─────────────────────────────────────────────────────────────────
 
+(defun %call-dunder-del (obj)
+  "Call __del__ on OBJ if it defines one, swallowing any errors."
+  (when (typep obj 'clython.runtime:py-object)
+    (handler-case
+        (let ((del-method (clython.runtime:py-getattr obj "__del__")))
+          (when del-method
+            (clython.runtime:py-call del-method nil nil)))
+      (error () nil))))
+
 (defmethod eval-node ((node clython.ast:delete-node) env)
   (dolist (target (clython.ast:delete-node-targets node))
     (cond
       ((typep target 'clython.ast:name-node)
-       (clython.scope:env-del (clython.ast:name-node-id target) env))
+       ;; Call __del__ before removing from scope
+       (let* ((name (clython.ast:name-node-id target))
+              (val (handler-case (clython.scope:env-get name env)
+                     (error () nil))))
+         (when val (%call-dunder-del val))
+         (clython.scope:env-del name env)))
       ((typep target 'clython.ast:subscript-node)
        (let ((obj (eval-node (clython.ast:subscript-node-value target) env))
              (key (eval-node (clython.ast:subscript-node-slice target) env)))

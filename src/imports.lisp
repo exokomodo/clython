@@ -135,11 +135,11 @@
                   (clython.runtime:make-py-function
                    :name "import_module"
                    :cl-fn (lambda (&rest args)
-                            ;; import_module(name, package=None)
-                            ;; We only support absolute imports for now.
                             (let ((name (clython.runtime:py-str-value (first args))))
                               (import-module name)))))
             mod)))
+  (setf (gethash "gc" *builtin-modules*) #'make-gc-module)
+  (setf (gethash "types" *builtin-modules*) #'make-types-module)
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
   (setf (gethash "re" *builtin-modules*) #'make-re-module)
   (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"

@@ -320,7 +320,6 @@ print(r.area())
     assert out == "abstract ok\n12"
 
 
-@pytest.mark.xfail(reason="Clython __del__ / gc.collect may not be implemented")
 def test_del_cleans_up():
     source = """
 class Resource:
