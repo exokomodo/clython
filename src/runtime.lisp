@@ -114,6 +114,9 @@
    #:make-py-complex
    #:make-py-str
    #:make-py-bytes
+   #:register-py-class
+   #:lookup-py-class
+   #:*class-registry*
    #:make-py-list
    #:make-py-tuple
    #:make-py-dict
@@ -2647,6 +2650,16 @@
      (make-py-function :name "__next__"
                        :cl-fn (lambda ()
                                  (py-next obj))))
+    ;; Async generator protocol: __aiter__ returns self, __anext__ advances
+    ((string= name "__aiter__")
+     (make-py-function :name "__aiter__"
+                       :cl-fn (lambda () obj)))
+    ((string= name "__anext__")
+     (make-py-function :name "__anext__"
+                       :cl-fn (lambda ()
+                                 ;; Returns a coroutine that yields the next value
+                                 (make-py-coroutine
+                                  (lambda () (py-next obj))))))
     (t (call-next-method))))
 
 (defmethod py-iter ((obj py-list))
@@ -3089,6 +3102,12 @@
                   (class-name (class-of obj))))))
 
 (defmethod py-call ((obj py-object) &rest args)
+  ;; Check for weakref.ref callable pattern
+  (let ((wp (gethash "__weakref_wp__" (py-object-dict obj))))
+    (when wp
+      ;; It's a weakref.ref instance — return live object or None
+      (let ((live (sb-ext:weak-pointer-value wp)))
+        (return-from py-call (or live +py-none+)))))
   (let ((fn (%lookup-dunder obj "__call__")))
     (if fn (apply #'py-call fn obj args)
         (py-raise "TypeError" "'~A' object is not callable"
@@ -3220,6 +3239,18 @@
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Keyword argument passing for builtins
 ;;;; ─────────────────────────────────────────────────────────────────────────
+
+;; Global class name → py-type registry, populated by class definitions.
+;; Used by pickle.loads to reconstruct instances by class name.
+(defvar *class-registry* (make-hash-table :test #'equal))
+
+(defun register-py-class (name cls)
+  "Register a py-type under NAME in the global class registry."
+  (setf (gethash name *class-registry*) cls))
+
+(defun lookup-py-class (name)
+  "Look up a class by NAME in the global registry."
+  (gethash name *class-registry*))
 
 (defvar *current-kwargs* nil
   "Alist of (name . py-value) for keyword arguments passed to the current call.
