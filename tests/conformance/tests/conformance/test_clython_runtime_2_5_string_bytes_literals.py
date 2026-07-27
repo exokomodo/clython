@@ -219,7 +219,6 @@ def test_string_literal_ast_structure():
     assert out == "hello\n5"
 
 
-@pytest.mark.xfail(strict=False, reason="bytes indexing may not be fully implemented in Clython")
 def test_bytes_literal_ast_structure():
     """Test bytes literal AST structure."""
     source = "x = b'hello'\nprint(len(x))\nprint(x[0])"

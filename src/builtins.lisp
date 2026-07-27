@@ -952,6 +952,46 @@
           (make-instance 'clython.runtime:py-classmethod-wrapper
                          :function noop-fn))))
 
+;; type.__new__(mcs, name, bases, dict) — creates a new type object.
+;; This is what super().__new__(mcs, ...) resolves to in metaclass definitions.
+(unless (clython.runtime:py-type-dict *type-type*)
+  (setf (clython.runtime:py-type-dict *type-type*) (make-hash-table :test #'equal)))
+(setf (gethash "__new__" (clython.runtime:py-type-dict *type-type*))
+      (clython.runtime:make-py-function
+       :name "__new__"
+       :cl-fn (lambda (mcs &rest args)
+                (declare (ignore mcs))
+                (cond
+                  ((= (length args) 3)
+                   (let* ((name-obj  (first args))
+                          (bases-obj (second args))
+                          (dict-obj  (third args))
+                          (name (cond
+                                  ((typep name-obj 'clython.runtime:py-str)
+                                   (clython.runtime:py-str-value name-obj))
+                                  ((stringp name-obj) name-obj)
+                                  (t "")))
+                          (bases (cond
+                                   ((typep bases-obj 'clython.runtime:py-tuple)
+                                    (coerce (clython.runtime:py-tuple-value bases-obj) 'list))
+                                   ((typep bases-obj 'clython.runtime:py-list)
+                                    (coerce (clython.runtime:py-list-value bases-obj) 'list))
+                                   (t nil)))
+                          (tdict (make-hash-table :test #'equal)))
+                     (cond
+                       ((typep dict-obj 'clython.runtime:py-dict)
+                        (maphash (lambda (k v)
+                                   (let ((key (if (typep k 'clython.runtime:py-str)
+                                                  (clython.runtime:py-str-value k)
+                                                  k)))
+                                     (setf (gethash key tdict) v)))
+                                 (clython.runtime:py-dict-value dict-obj)))
+                       ((hash-table-p dict-obj)
+                        (maphash (lambda (k v) (setf (gethash k tdict) v)) dict-obj)))
+                     (clython.runtime:make-py-type :name name :bases bases :tdict tdict)))
+                  (t (clython.runtime:py-raise "TypeError"
+                       "type.__new__ takes 4 arguments"))))))
+
 ;;;; ─────────────────────────────────────────────────────────────────────────
 ;;;; Exception classes — registered as callable py-type objects in *builtins*
 ;;;; ─────────────────────────────────────────────────────────────────────────
