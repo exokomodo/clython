@@ -463,7 +463,6 @@ def test_import_statement_introspection():
     assert out == "True"
 
 
-@pytest.mark.xfail(strict=False, reason="__main__ module introspection may not be implemented in Clython")
 def test_main_module_patterns():
     """Test patterns related to __main__ module."""
     source = "import sys\nprint('__main__' in sys.modules)"
