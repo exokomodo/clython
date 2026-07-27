@@ -19,11 +19,70 @@
                     (clython.runtime:make-py-str
                      (format nil "~{~A~^/~}"
                              (mapcar #'clython.runtime:py->cl parts))))))
-    ;; os.path.exists(path) — stub returns False
+    ;; os.path.exists(path) — checks actual filesystem
     (setf (gethash "exists" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
            :name "exists"
-           :cl-fn (lambda (p) (declare (ignore p)) clython.runtime:+py-false+)))
+           :cl-fn (lambda (p)
+                    (clython.runtime:py-bool-from-cl
+                     (not (null (probe-file (clython.runtime:py-str-value p))))))))
+    ;; os.path.sep — path separator ('/' on Unix, '\\' on Windows)
+    (setf (gethash "sep" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-str
+           (string #+windows #\\ #-windows #\/)))
+    ;; os.path.dirname(path)
+    (setf (gethash "dirname" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "dirname"
+           :cl-fn (lambda (p)
+                    (let* ((s (clython.runtime:py-str-value p))
+                           (pos (or (position #\/ s :from-end t)
+                                   (position #\\ s :from-end t))))
+                      (clython.runtime:make-py-str
+                       (if pos (subseq s 0 pos) ""))))))
+    ;; os.path.basename(path)
+    (setf (gethash "basename" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "basename"
+           :cl-fn (lambda (p)
+                    (let* ((s (clython.runtime:py-str-value p))
+                           (pos (or (position #\/ s :from-end t)
+                                   (position #\\ s :from-end t))))
+                      (clython.runtime:make-py-str
+                       (if pos (subseq s (1+ pos)) s))))))
+    ;; os.path.isfile(path) — true if path exists and is a regular file (not a dir)
+    (setf (gethash "isfile" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "isfile"
+           :cl-fn (lambda (p)
+                    (let* ((s (clython.runtime:py-str-value p))
+                           (pf (probe-file s)))
+                      (clython.runtime:py-bool-from-cl
+                       (and pf (pathname-name pf) t))))))
+    ;; os.path.isdir(path) — true if path exists and is a directory
+    (setf (gethash "isdir" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "isdir"
+           :cl-fn (lambda (p)
+                    (let* ((s (clython.runtime:py-str-value p))
+                           ;; Ensure trailing slash so probe-file sees directory
+                           (dir-s (if (or (string= s "") (member (char s (1- (length s)))
+                                                                  '(#\/ #\\)))
+                                      s
+                                      (concatenate 'string s "/")))
+                           (pf (probe-file dir-s)))
+                      (clython.runtime:py-bool-from-cl
+                       (and pf (not (pathname-name pf)) t))))))
+
+    ;; os.path.abspath(path) — resolve relative to CWD
+    (setf (gethash "abspath" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "abspath"
+           :cl-fn (lambda (p)
+                    (clython.runtime:make-py-str
+                     (namestring
+                      (merge-pathnames (clython.runtime:py-str-value p)
+                                       *default-pathname-defaults*))))))
     mod))
 
 (defun make-os-module ()

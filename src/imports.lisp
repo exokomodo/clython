@@ -125,6 +125,21 @@
   (setf (gethash "copy" *builtin-modules*) #'make-copy-module)
   (setf (gethash "abc" *builtin-modules*) #'make-abc-module)
   (setf (gethash "dataclasses" *builtin-modules*) #'make-dataclasses-module)
+  ;; importlib — import_module delegates to Clython's own import machinery
+  (setf (gethash "importlib" *builtin-modules*)
+        (lambda ()
+          (let ((mod (clython.runtime:make-py-module "importlib")))
+            (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
+                  (clython.runtime:make-py-str "importlib"))
+            (setf (gethash "import_module" (clython.runtime:py-module-dict mod))
+                  (clython.runtime:make-py-function
+                   :name "import_module"
+                   :cl-fn (lambda (&rest args)
+                            ;; import_module(name, package=None)
+                            ;; We only support absolute imports for now.
+                            (let ((name (clython.runtime:py-str-value (first args))))
+                              (import-module name)))))
+            mod)))
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
   (setf (gethash "re" *builtin-modules*) #'make-re-module)
   (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"
@@ -132,7 +147,7 @@
                   "stat" "posix" "errno" "heapq" "reprlib"
                   "numbers" "codecs" "copyreg" "operator" "threading" "enum"
                   "_sre" "sre_compile" "sre_parse" "sre_constants" "random"
-                  "importlib" "subprocess" "inspect"
+                  "subprocess" "inspect"
                   "contextlib" "weakref" "ntpath" "genericpath"
                   "_imp" "signal" "token" "tokenize"))
     (unless (gethash name *builtin-modules*)
