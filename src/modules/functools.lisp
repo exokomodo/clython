@@ -11,25 +11,56 @@
   (let ((mod (clython.runtime:make-py-module "functools")))
     (setf (gethash "__name__" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-str "functools"))
-    ;; wraps — identity decorator
+    ;; wraps(wrapped) — returns a decorator that copies metadata from wrapped onto wrapper
     (setf (gethash "wraps" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
            :name "wraps"
-           :cl-fn (lambda (&rest args)
-                    (declare (ignore args))
+           :cl-fn (lambda (wrapped &rest _)
+                    (declare (ignore _))
+                    ;; Return decorator that copies __name__, __doc__, __wrapped__
                     (clython.runtime:make-py-function
-                     :name "wraps_inner"
-                     :cl-fn (lambda (&rest inner) (first inner))))))
-    ;; lru_cache — identity decorator
+                     :name "wraps_decorator"
+                     :cl-fn (lambda (wrapper &rest __)
+                              (declare (ignore __))
+                              ;; Copy name from wrapped onto wrapper
+                              (when (typep wrapper 'clython.runtime:py-function)
+                                (let ((wname (clython.runtime:py-function-name wrapped)))
+                                  (setf (clython.runtime:py-function-name wrapper) wname)))
+                              wrapper)))))
+    ;; %make-caching-wrapper — wrap a py-function with a hash-table memo cache
+    (flet ((%make-caching-wrapper (fn maxsize)
+             (declare (ignore maxsize))
+             (let ((cache-ht (make-hash-table :test #'equal)))
+               (clython.runtime:make-py-function
+                :name (clython.runtime:py-function-name fn)
+                :cl-fn (lambda (&rest args)
+                         (let ((key (mapcar (lambda (x) (clython.runtime:py-repr x)) args)))
+                           (multiple-value-bind (cached found)
+                               (gethash key cache-ht)
+                             (if found cached
+                                 (let ((result (apply #'clython.runtime:py-call fn args)))
+                                   (setf (gethash key cache-ht) result)
+                                   result)))))))))
+    ;; lru_cache(maxsize=128) / lru_cache(fn) — memoising decorator
     (setf (gethash "lru_cache" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
            :name "lru_cache"
            :cl-fn (lambda (&rest args)
-                    (if (and args (typep (first args) 'clython.runtime:py-function))
-                        (first args)
-                        (clython.runtime:make-py-function
-                         :name "lru_cache_inner"
-                         :cl-fn (lambda (&rest dargs) (first dargs)))))))
+                    (let ((first-arg (first args)))
+                      (cond
+                        ;; @lru_cache  (called directly on function)
+                        ((typep first-arg 'clython.runtime:py-function)
+                         (%make-caching-wrapper first-arg 128))
+                        ;; @lru_cache(maxsize=N) — return decorator
+                        (t
+                         (let ((maxsize (if (and first-arg
+                                                 (typep first-arg 'clython.runtime:py-int))
+                                            (clython.runtime:py-int-value first-arg)
+                                            128)))
+                           (clython.runtime:make-py-function
+                            :name "lru_cache_decorator"
+                            :cl-fn (lambda (&rest fargs)
+                                     (%make-caching-wrapper (first fargs) maxsize))))))))))
     ;; reduce(fn, seq[, initial])
     (setf (gethash "reduce" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
@@ -136,6 +167,9 @@
                                                     (clython.runtime:py-eq self other))))))))))))
                     ;; Always return cls (whether we modified it or not)
                     cls)))
+    ;; cache — alias for lru_cache(maxsize=None), same behaviour
+    (setf (gethash "cache" (clython.runtime:py-module-dict mod))
+          (gethash "lru_cache" (clython.runtime:py-module-dict mod)))) ; closes flet
     mod))
 
 ;;;; ─── io module ─────────────────────────────────────────────────────────────
