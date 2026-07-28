@@ -39,6 +39,25 @@
                              (if (integerp result)
                                  (clython.runtime:make-py-int result)
                                  (clython.runtime:make-py-float (coerce result 'double-float))))))))))
+    ;; log2, log10, log1p
+    (setf (gethash "log2" d)
+          (clython.runtime:make-py-function
+           :name "log2"
+           :cl-fn (lambda (x)
+                    (clython.runtime:make-py-float
+                     (coerce (log (coerce (clython.runtime:py->cl x) 'double-float) 2.0d0) 'double-float)))))
+    (setf (gethash "log10" d)
+          (clython.runtime:make-py-function
+           :name "log10"
+           :cl-fn (lambda (x)
+                    (clython.runtime:make-py-float
+                     (coerce (log (coerce (clython.runtime:py->cl x) 'double-float) 10.0d0) 'double-float)))))
+    (setf (gethash "log1p" d)
+          (clython.runtime:make-py-function
+           :name "log1p"
+           :cl-fn (lambda (x)
+                    (let ((v (coerce (clython.runtime:py->cl x) 'double-float)))
+                      (clython.runtime:make-py-float (log (+ 1.0d0 v)))))))
     ;; fabs
     (setf (gethash "fabs" d)
           (clython.runtime:make-py-function
