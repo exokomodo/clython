@@ -50,6 +50,23 @@
                                    (position #\\ s :from-end t))))
                       (clython.runtime:make-py-str
                        (if pos (subseq s (1+ pos)) s))))))
+    ;; os.path.splitext(path) → (root, ext)  e.g. ("foo.tar", ".gz")
+    (setf (gethash "splitext" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "splitext"
+           :cl-fn (lambda (p)
+                    (let* ((s (clython.runtime:py-str-value p))
+                           ;; find last dot AFTER any slash (base only)
+                           (slash-pos (or (position #\/ s :from-end t)
+                                         (position #\\ s :from-end t)))
+                           (base-start (if slash-pos (1+ slash-pos) 0))
+                           (dot-pos (position #\. s :from-end t :start base-start)))
+                      (if dot-pos
+                          (clython.runtime:make-py-tuple
+                           (list (clython.runtime:make-py-str (subseq s 0 dot-pos))
+                                 (clython.runtime:make-py-str (subseq s dot-pos))))
+                          (clython.runtime:make-py-tuple
+                           (list p (clython.runtime:make-py-str ""))))))))
     ;; os.path.isfile(path) — true if path exists and is a regular file (not a dir)
     (setf (gethash "isfile" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
@@ -105,9 +122,30 @@
            :cl-fn (lambda ()
                     (clython.runtime:make-py-str
                      (namestring (uiop:getcwd))))))
-    ;; os.sep
-    (setf (gethash "sep" (clython.runtime:py-module-dict mod))
-          (clython.runtime:make-py-str "/"))
+    ;; os.sep / os.linesep / os.devnull
+    (setf (gethash "sep"     (clython.runtime:py-module-dict mod)) (clython.runtime:make-py-str "/"))
+    (setf (gethash "linesep" (clython.runtime:py-module-dict mod)) (clython.runtime:make-py-str (string #\newline)))
+    (setf (gethash "devnull" (clython.runtime:py-module-dict mod)) (clython.runtime:make-py-str "/dev/null"))
+    ;; os.environ — a dict-like view of the process environment
+    (let ((env-dict (clython.runtime:make-py-dict)))
+      ;; sb-ext:posix-environ returns "KEY=VAL" strings
+      (loop for entry in #+sbcl (sb-ext:posix-environ) #-sbcl '()
+            for eq-pos = (position #\= entry)
+            when eq-pos
+            ;; dict-hash-key converts py-str → CL string; store under CL string directly
+            do (setf (gethash (subseq entry 0 eq-pos)
+                              (clython.runtime:py-dict-value env-dict))
+                     (clython.runtime:make-py-str (subseq entry (1+ eq-pos)))))
+      (setf (gethash "environ" (clython.runtime:py-module-dict mod)) env-dict))
+    ;; os.getenv(key[, default]) — convenience wrapper
+    (setf (gethash "getenv" (clython.runtime:py-module-dict mod))
+          (clython.runtime:make-py-function
+           :name "getenv"
+           :cl-fn (lambda (&rest args)
+                    (let* ((key (clython.runtime:py-str-value (first args)))
+                           (default (if (>= (length args) 2) (second args) clython.runtime:+py-none+))
+                           (val (uiop:getenv key)))
+                      (if val (clython.runtime:make-py-str val) default)))))
     mod))
 
 ;;; ─── json module ────────────────────────────────────────────────────────────

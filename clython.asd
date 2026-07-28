@@ -43,7 +43,8 @@
                                            (:file "inspect")
                                            (:file "weakref")
                                            (:file "copyreg")
-                                           (:file "pickle")))
+                                           (:file "pickle")
+                                           (:file "warnings")))
 
                              (:file "imports")
                              (:file "eval")
