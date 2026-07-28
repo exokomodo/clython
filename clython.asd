@@ -44,7 +44,11 @@
                                            (:file "weakref")
                                            (:file "copyreg")
                                            (:file "pickle")
-                                           (:file "warnings")))
+                                           (:file "warnings")
+                                           (:file "time")
+                                           (:file "hashlib")
+                                           (:file "struct")
+                                           (:file "enum")))
 
                              (:file "imports")
                              (:file "eval")
