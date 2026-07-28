@@ -147,10 +147,14 @@
   ;; C extension / stdlib stubs needed for CPython stdlib .py files to parse
   (setf (gethash "re" *builtin-modules*) #'make-re-module)
   (setf (gethash "warnings" *builtin-modules*) #'make-warnings-module)
+  (setf (gethash "time" *builtin-modules*) #'make-time-module)
+  (setf (gethash "hashlib" *builtin-modules*) #'make-hashlib-module)
+  (setf (gethash "struct" *builtin-modules*) #'make-struct-module)
+  (setf (gethash "enum" *builtin-modules*) #'make-enum-module)
   (dolist (name '("_string" "_collections" "_decimal" "_pydecimal"
                   "_weakrefset" "_py_abc"
                   "stat" "posix" "errno" "heapq" "reprlib"
-                  "numbers" "codecs" "operator" "threading" "enum"
+                  "numbers" "codecs" "operator" "threading"
                   "_sre" "sre_compile" "sre_parse" "sre_constants" "random"
                   "subprocess"
                   "contextlib" "ntpath" "genericpath"
