@@ -3178,6 +3178,172 @@
 (register-grammar-rule parameters)      ; parse-funcdef parameter handling
 (register-grammar-rule annotation)      ; type annotations in funcdef
 
+;; Atoms
+(register-grammar-rule atom)            ; parse-atom
+(register-grammar-rule primary)         ; parse-primary
+(register-grammar-rule power)           ; parse-power
+(register-grammar-rule strings)         ; parse-strings
+(register-grammar-rule tuple)           ; parse-tuple-from (result)
+(register-grammar-rule genexp)          ; parse-comp-for used in call-args
+(register-grammar-rule slice)           ; parse-slice
+
+;; Named / starred expressions
+(register-grammar-rule assignment_expression)   ; parse-named-expr
+(register-grammar-rule star_expression)         ; parse-star-expr
+(register-grammar-rule star_expressions)        ; parse-star-expr-or-expr
+(register-grammar-rule star_named_expression)   ; parse-star-expr / named-expr combo
+(register-grammar-rule star_named_expressions)  ; list of above
+
+;; Comparison + boolean
+(register-grammar-rule comparison)         ; parse-comparison
+(register-grammar-rule compare_op_bitwise_or_pair) ; parse-comparison (pairs)
+(register-grammar-rule eq_bitwise_or)      ; parse-comparison (== branch)
+(register-grammar-rule lt_bitwise_or)      ; parse-comparison (< branch)
+(register-grammar-rule lte_bitwise_or)     ; parse-comparison (<= branch)
+(register-grammar-rule gt_bitwise_or)      ; parse-comparison (> branch)
+(register-grammar-rule gte_bitwise_or)     ; parse-comparison (>= branch)
+(register-grammar-rule noteq_bitwise_or)   ; parse-comparison (!= branch)
+(register-grammar-rule notin_bitwise_or)   ; parse-comparison (not in)
+(register-grammar-rule isnot_bitwise_or)   ; parse-comparison (is not)
+(register-grammar-rule in_bitwise_or)      ; parse-comparison (in)
+(register-grammar-rule is_bitwise_or)      ; parse-comparison (is)
+
+;; Call arguments (parse-arglist)
+(register-grammar-rule arguments)       ; parse-arglist
+(register-grammar-rule args)            ; parse-arglist inner positional
+(register-grammar-rule kwargs)          ; parse-arglist keyword args
+(register-grammar-rule starred_expression) ; already registered — no-op
+
+;; Augmented assignment
+(register-grammar-rule augassign)       ; parse-assignment-or-expr (+= etc.)
+(register-grammar-rule annotated_rhs)   ; parse-assignment-or-expr (annotation rhs)
+
+;; Simple statement terminals
+(register-grammar-rule assert_stmt)     ; parse-assert-stmt
+(register-grammar-rule del_stmt)        ; parse-del-stmt
+(register-grammar-rule del_targets)     ; parse-del-stmt targets list
+(register-grammar-rule del_target)      ; parse-del-stmt individual target
+(register-grammar-rule del_t_atom)      ; parse-del-stmt atom
+(register-grammar-rule return_stmt)     ; parse-return-stmt
+(register-grammar-rule raise_stmt)      ; parse-raise-stmt
+(register-grammar-rule global_stmt)     ; parse-global-stmt
+(register-grammar-rule nonlocal_stmt)   ; parse-nonlocal-stmt
+(register-grammar-rule import_stmt)     ; parse-import-stmt
+(register-grammar-rule type_alias)      ; parse-type-stmt
+
+;; Import helpers
+(register-grammar-rule dotted_name)     ; parse-dotted-name
+(register-grammar-rule dotted_as_name)  ; parse-dotted-as-name
+(register-grammar-rule dotted_as_names) ; parse-dotted-as-names
+
+;; Compound statement helpers
+(register-grammar-rule if_stmt)         ; parse-if-stmt
+(register-grammar-rule elif_stmt)       ; parse-elif-else (elif branch)
+(register-grammar-rule else_block)      ; parse-elif-else (else branch)
+(register-grammar-rule while_stmt)      ; parse-while-stmt
+(register-grammar-rule for_stmt)        ; parse-for-stmt
+(register-grammar-rule try_stmt)        ; parse-try-stmt
+(register-grammar-rule except_block)    ; parse-try-stmt (except clause)
+(register-grammar-rule except_star_block) ; parse-try-stmt (except* clause)
+(register-grammar-rule finally_block)   ; parse-try-stmt (finally clause)
+(register-grammar-rule with_stmt)       ; parse-with-stmt
+(register-grammar-rule with_item)       ; parse-with-stmt (single item)
+(register-grammar-rule match_stmt)      ; parse-match-stmt
+(register-grammar-rule subject_expr)    ; parse-match-stmt subject
+(register-grammar-rule case_block)      ; parse-match-stmt case
+(register-grammar-rule guard)           ; parse-match-stmt guard
+
+;; Function parameters
+(register-grammar-rule param_with_default)  ; parse-func-params (param=default)
+(register-grammar-rule default)             ; parse-func-params (default value)
+(register-grammar-rule slash_no_default)    ; parse-func-params (/ positional-only)
+(register-grammar-rule slash_with_default)  ; parse-func-params (/ with defaults)
+(register-grammar-rule star_etc)            ; parse-func-params (*args, **kwargs)
+(register-grammar-rule param)               ; parse-func-params single param
+(register-grammar-rule param_no_default)    ; parse-func-params no-default param
+(register-grammar-rule star_annotation)     ; parse-func-params *args annotation
+(register-grammar-rule param_star_annotation) ; parse-func-params *-param annotation
+(register-grammar-rule lambda_params)       ; parse-lambda-params
+(register-grammar-rule lambda_parameters)   ; parse-lambda-params
+(register-grammar-rule lambda_slash_no_default)    ; parse-lambda-params /
+(register-grammar-rule lambda_slash_with_default)  ; parse-lambda-params / defaults
+(register-grammar-rule lambda_star_etc)     ; parse-lambda-params *args
+(register-grammar-rule lambda_kwds)         ; parse-lambda-params **kwargs
+(register-grammar-rule lambda_param_no_default) ; parse-lambda-params single
+(register-grammar-rule lambda_param_with_default) ; parse-lambda-params with default
+
+;; Match patterns
+(register-grammar-rule pattern)          ; parse-match-pattern
+(register-grammar-rule patterns)         ; parse-match-or-pattern
+(register-grammar-rule as_pattern)       ; parse-match-as-pattern
+(register-grammar-rule or_pattern)       ; parse-match-or-pattern
+(register-grammar-rule closed_pattern)   ; parse-match-closed-pattern
+(register-grammar-rule literal_pattern)  ; parse-match-closed-pattern (literals)
+(register-grammar-rule literal_expr)     ; parse-match-closed-pattern
+(register-grammar-rule complex_number)   ; parse-match-closed-pattern (complex)
+(register-grammar-rule signed_number)    ; parse-match-closed-pattern
+(register-grammar-rule signed_real_number) ; parse-match-closed-pattern
+(register-grammar-rule real_number)      ; parse-match-closed-pattern
+(register-grammar-rule imaginary_number) ; parse-match-closed-pattern
+(register-grammar-rule capture_pattern)  ; parse-match-closed-pattern
+(register-grammar-rule pattern_capture_target) ; parse-match-closed-pattern
+(register-grammar-rule wildcard_pattern) ; parse-match-closed-pattern (_)
+(register-grammar-rule value_pattern)    ; parse-match-closed-pattern (dotted)
+(register-grammar-rule attr)             ; parse-match-closed-pattern (attr)
+(register-grammar-rule group_pattern)    ; parse-match-closed-pattern (group)
+(register-grammar-rule sequence_pattern) ; parse-match-closed-pattern
+(register-grammar-rule open_sequence_pattern) ; parse-match-closed-pattern
+(register-grammar-rule maybe_sequence_pattern) ; parse-match-closed-pattern
+(register-grammar-rule maybe_star_pattern) ; parse-match-closed-pattern
+(register-grammar-rule star_pattern)     ; parse-match-closed-pattern
+(register-grammar-rule mapping_pattern)  ; parse-match-closed-pattern (dict)
+(register-grammar-rule items_pattern)    ; parse-match-closed-pattern
+(register-grammar-rule key_value_pattern) ; parse-match-closed-pattern
+(register-grammar-rule double_star_pattern) ; parse-match-closed-pattern (**rest)
+(register-grammar-rule class_pattern)    ; parse-match-closed-pattern (class)
+(register-grammar-rule positional_patterns) ; parse-match-closed-pattern
+(register-grammar-rule keyword_patterns) ; parse-match-closed-pattern
+(register-grammar-rule keyword_pattern)  ; parse-match-closed-pattern
+
+;; Target assignment helpers
+(register-grammar-rule single_target)              ; parse-assignment-or-expr
+(register-grammar-rule single_subscript_attribute_target) ; parse-assignment-or-expr
+(register-grammar-rule t_primary)                  ; parse-primary (augassign lhs)
+(register-grammar-rule t_lookahead)                ; parse-primary (lookahead)
+(register-grammar-rule target_with_star_atom)      ; parse-target-list
+(register-grammar-rule star_targets_list_seq)      ; parse-target-list
+(register-grammar-rule star_targets_tuple_seq)     ; parse-target-list
+
+;; Yield
+(register-grammar-rule yield_expr)      ; parse-yield-expr
+
+;; Type params (PEP 695)
+(register-grammar-rule type_params)     ; parse-type-stmt
+(register-grammar-rule type_param_seq)  ; parse-type-stmt
+(register-grammar-rule type_param)      ; parse-type-stmt (single)
+(register-grammar-rule type_param_bound) ; parse-type-stmt (bound)
+
+;; Type expression list (annotations)
+(register-grammar-rule type_expressions)  ; annotation type hints
+(register-grammar-rule expression_without_invalid) ; parse-expression (non-error)
+
+;; Comprehension / evaluation order
+(register-grammar-rule listcomp)        ; parse-list-expr (with comprehension)
+(register-grammar-rule setcomp)         ; parse-dict-or-set (set comprehension)
+(register-grammar-rule dictcomp)        ; parse-dict-or-set (dict comprehension)
+
+;; Interactive / eval / func_type / fstring top-level
+(register-grammar-rule interactive)     ; top-level interactive mode (REPL)
+(register-grammar-rule eval)            ; parse-expression (eval input)
+(register-grammar-rule func_type)       ; function type comment stub
+(register-grammar-rule func_type_comment) ; inline type comment in func
+(register-grammar-rule fstring)         ; f-string top-level rule
+(register-grammar-rule fstring_middle)          ; f-string literal part
+(register-grammar-rule fstring_replacement_field) ; f-string {expr}
+(register-grammar-rule fstring_conversion)      ; f-string !r/!s/!a
+(register-grammar-rule fstring_full_format_spec) ; f-string :format
+(register-grammar-rule fstring_format_spec)     ; f-string format spec content
+
 ;; Match statement patterns
 
 ;; Star targets
@@ -3188,3 +3354,22 @@
 (register-grammar-rule file)            ; parse-module
 (register-grammar-rule statements)      ; parse-module body
 (register-grammar-rule statement_newline) ; parse-statement + newline
+(register-grammar-rule statement)       ; parse-statement
+
+;; Remaining sub-rules handled inline
+(register-grammar-rule double_starred_kvpair)   ; dict **kv pair in dict literal
+(register-grammar-rule double_starred_kvpairs)  ; sequence of **kv pairs
+(register-grammar-rule kvpair)                  ; key:value pair in dict literal
+(register-grammar-rule import_from_as_name)     ; from X import Y as Z — single name
+(register-grammar-rule import_from_as_names)    ; from X import (Y, Z as W, ...)
+(register-grammar-rule import_from_targets)     ; from X import <target>
+(register-grammar-rule kwarg_or_double_starred) ; keyword arg or **expr in call
+(register-grammar-rule kwarg_or_starred)        ; keyword arg or *expr in call
+(register-grammar-rule kwds)                    ; **kwargs in call argument list
+(register-grammar-rule lambda_param)            ; single lambda parameter
+(register-grammar-rule lambda_param_maybe_default) ; lambda param with optional default
+(register-grammar-rule named_expression)        ; assignment expression (walrus :=)
+(register-grammar-rule name_or_attr)            ; name or attr access (match pattern)
+(register-grammar-rule param_maybe_default)     ; function param with optional default
+(register-grammar-rule param_no_default_star_annotation) ; *-annotated param no default
+(register-grammar-rule star_target)             ; single starred target in assignment
