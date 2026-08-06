@@ -33,27 +33,67 @@
         (values (clython.eval:eval-node expr env) t))
     (error () (values nil nil))))
 
+(defun block-starter-p (line)
+  "Return T if LINE ends with a colon, indicating a block-starting statement."
+  (let ((trimmed (string-right-trim '(#\Space #\Tab #\Return) line)))
+    (and (plusp (length trimmed))
+         (char= (char trimmed (1- (length trimmed))) #\:))))
+
+(defun continuation-line-p (line)
+  "Return T if LINE is indented (belongs to a block body)."
+  (and (plusp (length line))
+       (or (char= (char line 0) #\Space)
+           (char= (char line 0) #\Tab))))
+
 (defun repl ()
-  "Start an interactive Clython REPL."
+  "Start an interactive Clython REPL.
+
+  Supports multi-line input: when a line ends with ':', keep reading
+  continuation lines (shown with '... ' prompt) until a blank line
+  signals end of block. Blank lines on a fresh prompt are ignored."
   (format t "Clython 0.1.0 — Python in Common Lisp~%")
   (format t "Type (quit) to exit.~%~%")
   (let ((env (clython.scope:make-global-env)))
     (loop
       (format t ">>> ")
       (force-output)
-      (let ((line (read-line *standard-input* nil :eof)))
-        (when (or (eq line :eof)
-                  (string= line "(quit)"))
-          (return))
-        (unless (string= (string-trim '(#\Space #\Tab) line) "")
-          (handler-case
-              ;; Try as expression first (like CPython's eval mode)
-              (multiple-value-bind (result ok) (py-eval-expr line env)
-                (if ok
-                    ;; Expression — print result unless None
-                    (unless (eq result clython.runtime:+py-none+)
-                      (format t "~A~%" (clython.runtime:py-repr result)))
-                    ;; Not an expression — execute as statements
-                    (py-eval line env)))
-            (error (e)
-              (format t "Error: ~A~%" e))))))))
+      (let ((first-line (read-line *standard-input* nil :eof)))
+        (cond
+          ;; EOF or quit — exit.
+          ((or (eq first-line :eof)
+               (string= first-line "(quit)"))
+           (return))
+          ;; Blank line at top level — skip.
+          ((string= (string-trim '(#\Space #\Tab) first-line) "")
+           nil)
+          (t
+           ;; Accumulate source: single line or multi-line block.
+           (let ((source
+                  (if (block-starter-p first-line)
+                      ;; Multi-line mode: read until a blank line or EOF.
+                      (with-output-to-string (buf)
+                        (write-string first-line buf)
+                        (write-char #\Newline buf)
+                        (loop
+                          (format t "... ")
+                          (force-output)
+                          (let ((cont (read-line *standard-input* nil :eof)))
+                            (when (or (eq cont :eof)
+                                      (string= (string-trim '(#\Space #\Tab) cont) ""))
+                              (return))
+                            (write-string cont buf)
+                            (write-char #\Newline buf))))
+                      ;; Single-line mode.
+                      first-line)))
+             (handler-case
+                 ;; Try as expression first (like CPython's eval mode).
+                 (multiple-value-bind (result ok) (py-eval-expr source env)
+                   (if ok
+                       ;; Expression — print result unless None.
+                       (unless (eq result clython.runtime:+py-none+)
+                         (format t "~A~%" (clython.runtime:py-repr result)))
+                       ;; Statement(s) — execute in current env.
+                       (py-eval source env)))
+               (error (e)
+                 (format t "Error: ~A~%" e)))))))))
+)
