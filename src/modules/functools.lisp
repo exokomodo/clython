@@ -81,18 +81,27 @@
                             (setf acc (clython.runtime:py-call fn acc item))
                             (setf acc item)))
                       (or acc clython.runtime:+py-none+)))))
-    ;; partial(fn, *args, **kwargs) — returns a partial application
+    ;; partial(fn, *args, **kwargs) — returns a partial application.
+    ;; Captures both positional args and keyword args at definition time;
+    ;; merges them with any additional args/kwargs at call time.
     (setf (gethash "partial" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
            :name "partial"
            :cl-fn (lambda (&rest args)
                     (let ((fn (first args))
-                          (bound-args (rest args)))
+                          (bound-args (rest args))
+                          ;; Capture kwargs at partial() definition time
+                          (bound-kwargs (copy-alist clython.runtime:*current-kwargs*)))
                       (clython.runtime:make-py-function
                        :name "partial"
                        :cl-fn (lambda (&rest call-args)
-                                (apply #'clython.runtime:py-call fn
-                                       (append bound-args call-args))))))))
+                                ;; Merge: call-time kwargs override bound kwargs
+                                (let ((merged-kwargs
+                                       (append clython.runtime:*current-kwargs* bound-kwargs)))
+                                  (let ((clython.runtime:*current-kwargs* merged-kwargs))
+                                    (apply #'clython.runtime:py-call fn
+                                           (append bound-args call-args))))))))))
+
     ;; total_ordering — class decorator that fills in missing comparison methods.
     ;; Given __eq__ and one of __lt__/__le__/__gt__/__ge__, fills in the rest.
     (setf (gethash "total_ordering" (clython.runtime:py-module-dict mod))
