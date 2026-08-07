@@ -49,16 +49,28 @@
                                       (%apply-dataclass (first inner-args))
                                       clython.runtime:+py-none+)))))))
 
-    ;; ── field() helper (stub) ────────────────────────────────────────────
+    ;; ── field() helper ───────────────────────────────────────────────────
+    ;; Stores default_factory/default on a Field sentinel so __init__ can
+    ;; call the factory per instance (avoids mutable-default-arg sharing).
     (setf (gethash "field" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
            :name "field"
-           :cl-fn (lambda (&rest args)
-                    (declare (ignore args))
-                    ;; Return a sentinel object; full implementation deferred
-                    (let ((obj (make-instance 'clython.runtime:py-object
-                                              :py-class (clython.runtime:make-py-type :name "Field")
-                                              :py-dict (make-hash-table :test #'equal))))
+           :cl-fn (lambda (&rest _positional)
+                    (declare (ignore _positional))
+                    (let* ((kwargs clython.runtime:*current-kwargs*)
+                           (factory (let ((kv (assoc "default_factory" kwargs :test #'string=)))
+                                      (when kv (cdr kv))))
+                           (kw-default (let ((kv (assoc "default" kwargs :test #'string=)))
+                                         (when kv (cdr kv))))
+                           (obj (make-instance 'clython.runtime:py-object
+                                               :py-class (clython.runtime:make-py-type :name "Field")
+                                               :py-dict (make-hash-table :test #'equal))))
+                      (when factory
+                        (setf (gethash "_factory" (clython.runtime:py-object-dict obj)) factory))
+                      (when kw-default
+                        (setf (gethash "_default" (clython.runtime:py-object-dict obj)) kw-default))
+                      (setf (gethash "_is_field" (clython.runtime:py-object-dict obj))
+                            clython.runtime:+py-true+)
                       obj))))
 
     ;; ── fields() — returns tuple of Field objects (stub) ─────────────────
@@ -110,7 +122,9 @@
                                       collect (multiple-value-bind (v found)
                                                   (gethash fname tdict)
                                                 (if found v :no-default)))))
-                          ;; Fill in positional args, fall back to defaults
+                          ;; Fill in positional args, fall back to defaults.
+                          ;; If the default is a Field descriptor (from field()), call
+                          ;; its factory to produce a fresh default per instance.
                           (loop for fname in field-names
                                 for default in defaults
                                 for i from 0
@@ -118,7 +132,20 @@
                                                   (nth i init-args)
                                                   (if (eq default :no-default)
                                                       (error "Missing required field: ~A" fname)
-                                                      default))))
+                                                      ;; Check if default is a Field descriptor
+                                                      (let* ((fdict (when (typep default 'clython.runtime:py-object)
+                                                                      (clython.runtime:py-object-dict default)))
+                                                             (is-field (when fdict
+                                                                         (nth-value 1 (gethash "_is_field" fdict)))))
+                                                        (if is-field
+                                                            ;; Call factory or use stored default
+                                                            (let ((factory (when fdict (gethash "_factory" fdict)))
+                                                                  (stored-default (when fdict (gethash "_default" fdict))))
+                                                              (cond
+                                                                (factory (clython.runtime:py-call factory))
+                                                                (stored-default stored-default)
+                                                                (t clython.runtime:+py-none+)))
+                                                            default))))))
                                      (clython.runtime:py-setattr self fname val))))
                         clython.runtime:+py-none+)))))
 
@@ -155,10 +182,14 @@
                               (if (not same-type)
                                   clython.runtime:+py-false+
                                   (if (every (lambda (fname)
-                                               (clython.runtime:py-bool-val
-                                                (clython.runtime:py-eq
-                                                 (clython.runtime:py-getattr self fname)
-                                                 (clython.runtime:py-getattr other fname))))
+                                               ;; py-eq may return a CL boolean or a py-bool;
+                                               ;; coerce to CL truthiness before passing to every.
+                                               (let ((r (clython.runtime:py-eq
+                                                         (clython.runtime:py-getattr self fname)
+                                                         (clython.runtime:py-getattr other fname))))
+                                                 (if (typep r 'clython.runtime:py-object)
+                                                     (clython.runtime:py-bool-val r)
+                                                     r)))
                                              field-names)
                                       clython.runtime:+py-true+
                                       clython.runtime:+py-false+)))))))))
