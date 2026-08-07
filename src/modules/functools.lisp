@@ -27,36 +27,78 @@
                                 (let ((wname (clython.runtime:py-function-name wrapped)))
                                   (setf (clython.runtime:py-function-name wrapper) wname)))
                               wrapper)))))
-    ;; %make-caching-wrapper — wrap a py-function with a hash-table memo cache
+    ;; %make-caching-wrapper — wrap a py-function with a hash-table memo cache.
+    ;; Exposes cache_info() returning a CacheInfo-like namedtuple-style object
+    ;; with hits, misses, maxsize, currsize attributes.
     (flet ((%make-caching-wrapper (fn maxsize)
-             (declare (ignore maxsize))
-             (let ((cache-ht (make-hash-table :test #'equal)))
-               (clython.runtime:make-py-function
-                :name (clython.runtime:py-function-name fn)
-                :cl-fn (lambda (&rest args)
-                         (let ((key (mapcar (lambda (x) (clython.runtime:py-repr x)) args)))
-                           (multiple-value-bind (cached found)
-                               (gethash key cache-ht)
-                             (if found cached
-                                 (let ((result (apply #'clython.runtime:py-call fn args)))
-                                   (setf (gethash key cache-ht) result)
-                                   result)))))))))
+             (let ((cache-ht (make-hash-table :test #'equal))
+                   (hits 0)
+                   (misses 0))
+               (let ((wrapper
+                      (clython.runtime:make-py-function
+                       :name (clython.runtime:py-function-name fn)
+                       :cl-fn (lambda (&rest args)
+                                (let ((key (mapcar (lambda (x) (clython.runtime:py-repr x)) args)))
+                                  (multiple-value-bind (cached found)
+                                      (gethash key cache-ht)
+                                    (if found
+                                        (progn (incf hits) cached)
+                                        (let ((result (apply #'clython.runtime:py-call fn args)))
+                                          (incf misses)
+                                          (setf (gethash key cache-ht) result)
+                                          result))))))))
+                 ;; Attach cache_info() as an attribute on the wrapper function.
+                 ;; cache_info() → an object with .hits .misses .maxsize .currsize
+                 (let ((info-fn
+                        (clython.runtime:make-py-function
+                         :name "cache_info"
+                         :cl-fn (lambda (&rest _)
+                                  (declare (ignore _))
+                                  ;; Return as a tuple: (hits, misses, maxsize, currsize)
+                                  ;; matching CPython's CacheInfo namedtuple behaviour.
+                                  (clython.runtime:make-py-tuple
+                                   (vector
+                                    (clython.runtime:make-py-int hits)
+                                    (clython.runtime:make-py-int misses)
+                                    (if maxsize
+                                        (clython.runtime:make-py-int maxsize)
+                                        clython.runtime:+py-none+)
+                                    (clython.runtime:make-py-int (hash-table-count cache-ht))))))))
+
+                   (let ((wdict (make-hash-table :test #'equal)))
+                     (setf (gethash "cache_info"  wdict) info-fn)
+                     (setf (gethash "cache_clear" wdict)
+                           (clython.runtime:make-py-function
+                            :name "cache_clear"
+                            :cl-fn (lambda (&rest _)
+                                     (declare (ignore _))
+                                     (clrhash cache-ht)
+                                     (setf hits 0)
+                                     (setf misses 0)
+                                     clython.runtime:+py-none+)))
+                     (setf (clython.runtime:py-object-dict wrapper) wdict)))
+                 wrapper))))
+
     ;; lru_cache(maxsize=128) / lru_cache(fn) — memoising decorator
     (setf (gethash "lru_cache" (clython.runtime:py-module-dict mod))
           (clython.runtime:make-py-function
            :name "lru_cache"
            :cl-fn (lambda (&rest args)
-                    (let ((first-arg (first args)))
+                    (let ((first-arg (first args))
+                          ;; Read maxsize from kwargs if present
+                          (kw-maxsize (let ((kw (assoc "maxsize" clython.runtime:*current-kwargs* :test #'string=)))
+                                        (when (and kw (typep (cdr kw) 'clython.runtime:py-int))
+                                          (clython.runtime:py-int-value (cdr kw))))))
                       (cond
-                        ;; @lru_cache  (called directly on function)
+                        ;; @lru_cache  (called directly on function, no parentheses)
                         ((typep first-arg 'clython.runtime:py-function)
                          (%make-caching-wrapper first-arg 128))
-                        ;; @lru_cache(maxsize=N) — return decorator
+                        ;; @lru_cache(maxsize=N) or @lru_cache() — return decorator
                         (t
-                         (let ((maxsize (if (and first-arg
-                                                 (typep first-arg 'clython.runtime:py-int))
-                                            (clython.runtime:py-int-value first-arg)
-                                            128)))
+                         (let ((maxsize (or kw-maxsize
+                                           (when (and first-arg (typep first-arg 'clython.runtime:py-int))
+                                             (clython.runtime:py-int-value first-arg))
+                                           128)))
                            (clython.runtime:make-py-function
                             :name "lru_cache_decorator"
                             :cl-fn (lambda (&rest fargs)
