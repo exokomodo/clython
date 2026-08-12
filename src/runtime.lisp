@@ -2022,6 +2022,149 @@
                                                        pad
                                                        (subseq s 1)))
                              (make-py-str (concatenate 'string pad s)))))))))
+        ((string= name "swapcase")
+         (wrap (lambda ()
+                 (make-py-str
+                  (map 'string
+                       (lambda (c)
+                         (cond ((upper-case-p c) (char-downcase c))
+                               ((lower-case-p c) (char-upcase c))
+                               (t c)))
+                       s)))))
+        ((string= name "center")
+         (wrap (lambda (width-obj &optional fill-obj)
+                 (let* ((width (py-int-value width-obj))
+                        (fill (if fill-obj (char (py-str-value fill-obj) 0) #\Space))
+                        (marg (- width (length s))))
+                   (if (<= marg 0)
+                       (make-py-str s)
+                       ;; CPython: left = marg/2 + (marg & width & 1), so the
+                       ;; extra pad lands left or right depending on parity.
+                       (let* ((left (+ (floor marg 2) (logand marg width 1)))
+                              (right (- marg left)))
+                         (make-py-str
+                          (concatenate 'string
+                                       (make-string left :initial-element fill)
+                                       s
+                                       (make-string right :initial-element fill)))))))))
+        ((string= name "ljust")
+         (wrap (lambda (width-obj &optional fill-obj)
+                 (let* ((width (py-int-value width-obj))
+                        (fill (if fill-obj (char (py-str-value fill-obj) 0) #\Space))
+                        (pad (- width (length s))))
+                   (if (<= pad 0)
+                       (make-py-str s)
+                       (make-py-str (concatenate 'string s
+                                                 (make-string pad :initial-element fill))))))))
+        ((string= name "rjust")
+         (wrap (lambda (width-obj &optional fill-obj)
+                 (let* ((width (py-int-value width-obj))
+                        (fill (if fill-obj (char (py-str-value fill-obj) 0) #\Space))
+                        (pad (- width (length s))))
+                   (if (<= pad 0)
+                       (make-py-str s)
+                       (make-py-str (concatenate 'string
+                                                 (make-string pad :initial-element fill)
+                                                 s)))))))
+        ((string= name "expandtabs")
+         (wrap (lambda (&optional size-obj)
+                 (let ((size (if size-obj (py-int-value size-obj) 8))
+                       (col 0)
+                       (out (make-string-output-stream)))
+                   (loop for c across s do
+                     (cond
+                       ((char= c #\Tab)
+                        ;; Advance to the next multiple of SIZE. A non-positive
+                        ;; tabsize drops the tab entirely, as CPython does.
+                        (let ((n (if (plusp size) (- size (mod col size)) 0)))
+                          (dotimes (i n) (write-char #\Space out))
+                          (incf col n)))
+                       ((or (char= c #\Newline) (char= c #\Return))
+                        (write-char c out)
+                        (setf col 0))
+                       (t (write-char c out) (incf col))))
+                   (make-py-str (get-output-stream-string out))))))
+        ((string= name "rfind")
+         (wrap (lambda (sub-obj)
+                 (let ((pos (search (py-str-value sub-obj) s :from-end t)))
+                   (make-py-int (or pos -1))))))
+        ((string= name "rindex")
+         (wrap (lambda (sub-obj)
+                 (let ((pos (search (py-str-value sub-obj) s :from-end t)))
+                   (if pos
+                       (make-py-int pos)
+                       (py-raise "ValueError" "substring not found"))))))
+        ((string= name "partition")
+         (wrap (lambda (sep-obj)
+                 (let* ((sep (py-str-value sep-obj))
+                        (pos (search sep s)))
+                   ;; No match: the whole string goes first, per CPython.
+                   (if pos
+                       (make-py-tuple
+                        (list (make-py-str (subseq s 0 pos))
+                              (make-py-str sep)
+                              (make-py-str (subseq s (+ pos (length sep))))))
+                       (make-py-tuple (list (make-py-str s)
+                                            (make-py-str "")
+                                            (make-py-str ""))))))))
+        ((string= name "rpartition")
+         (wrap (lambda (sep-obj)
+                 (let* ((sep (py-str-value sep-obj))
+                        (pos (search sep s :from-end t)))
+                   ;; No match: the whole string goes LAST, per CPython.
+                   (if pos
+                       (make-py-tuple
+                        (list (make-py-str (subseq s 0 pos))
+                              (make-py-str sep)
+                              (make-py-str (subseq s (+ pos (length sep))))))
+                       (make-py-tuple (list (make-py-str "")
+                                            (make-py-str "")
+                                            (make-py-str s))))))))
+        ((string= name "isalnum")
+         (wrap (lambda ()
+                 (py-bool-from-cl (and (plusp (length s))
+                                       (every #'alphanumericp s))))))
+        ((string= name "isspace")
+         (wrap (lambda ()
+                 (py-bool-from-cl
+                  (and (plusp (length s))
+                       (every (lambda (c)
+                                (member c '(#\Space #\Tab #\Newline #\Return #\Page)))
+                              s))))))
+        ((string= name "isupper")
+         (wrap (lambda ()
+                 ;; Needs at least one cased char, and every cased char upper.
+                 (py-bool-from-cl
+                  (and (some #'both-case-p s)
+                       (notany #'lower-case-p s))))))
+        ((string= name "islower")
+         (wrap (lambda ()
+                 (py-bool-from-cl
+                  (and (some #'both-case-p s)
+                       (notany #'upper-case-p s))))))
+        ((string= name "splitlines")
+         (wrap (lambda (&optional keepends-obj)
+                 (let ((keep (and keepends-obj (py-bool-val keepends-obj)))
+                       (lines nil)
+                       (start 0)
+                       (i 0)
+                       (len (length s)))
+                   (loop while (< i len) do
+                     (let ((c (char s i)))
+                       (if (or (char= c #\Newline) (char= c #\Return))
+                           ;; Treat CRLF as one boundary.
+                           (let ((end (if (and (char= c #\Return)
+                                               (< (1+ i) len)
+                                               (char= (char s (1+ i)) #\Newline))
+                                          (+ i 2)
+                                          (1+ i))))
+                             (push (subseq s start (if keep end i)) lines)
+                             (setf i end start end))
+                           (incf i))))
+                   ;; Trailing segment only when the string does not end on a break.
+                   (when (< start len)
+                     (push (subseq s start len) lines))
+                   (make-py-list (mapcar #'make-py-str (nreverse lines)))))))
         (t (call-next-method))))))
 
 ;;; ─── List methods ──────────────────────────────────────────────────────────

@@ -398,3 +398,113 @@ class TestKeywordModule:
         out, _, rc = clython_run("import keyword\nprint('for' in keyword.kwlist)")
         assert rc == 0
         assert out == "True"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# str methods: padding, tabs, search, partition, predicates, splitlines
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestStrPaddingMethods:
+    def test_center_even_padding(self):
+        out, _, rc = clython_run("print(repr('abc'.center(7, '-')))")
+        assert rc == 0
+        assert out == "'--abc--'"
+
+    def test_center_odd_padding_favours_left(self):
+        """CPython: left = marg//2 + (marg & width & 1)."""
+        out, _, rc = clython_run("print(repr('ab'.center(5, '-')), repr('a'.center(4, '*')))")
+        assert rc == 0
+        assert out == "'--ab-' '*a**'"
+
+    def test_center_width_not_greater_than_len(self):
+        out, _, rc = clython_run("print(repr('ab'.center(2)))")
+        assert rc == 0
+        assert out == "'ab'"
+
+    def test_ljust_rjust(self):
+        out, _, rc = clython_run("print(repr('ab'.ljust(4, '.')), repr('ab'.rjust(4, '.')))")
+        assert rc == 0
+        assert out == "'ab..' '..ab'"
+
+
+class TestStrExpandtabs:
+    def test_expandtabs_advances_to_next_stop(self):
+        out, _, rc = clython_run(r"print(repr('a\tb'.expandtabs(4)), repr('ab\tc'.expandtabs(4)))")
+        assert rc == 0
+        assert out == "'a   b' 'ab  c'"
+
+    def test_expandtabs_resets_column_on_newline(self):
+        """Column restarts after a newline, so the tab expands to 3 spaces.
+
+        Compared via == rather than repr(): repr() does not yet escape
+        control characters (see issue #220), which is a separate bug.
+        """
+        out, _, rc = clython_run(
+            r"print('a\nb\tc'.expandtabs(4) == 'a' + chr(10) + 'b   c')"
+        )
+        assert rc == 0
+        assert out == "True"
+
+
+class TestStrSearchMethods:
+    def test_rfind_returns_last_match(self):
+        out, _, rc = clython_run("print('abcabc'.rfind('a'), 'abc'.rfind('z'))")
+        assert rc == 0
+        assert out == "3 -1"
+
+    def test_partition_splits_on_first(self):
+        out, _, rc = clython_run("print('a-b-c'.partition('-'))")
+        assert rc == 0
+        assert out == "('a', '-', 'b-c')"
+
+    def test_rpartition_splits_on_last(self):
+        out, _, rc = clython_run("print('a-b-c'.rpartition('-'))")
+        assert rc == 0
+        assert out == "('a-b', '-', 'c')"
+
+    def test_partition_no_match_puts_string_first(self):
+        out, _, rc = clython_run("print('xy'.partition('-'))")
+        assert rc == 0
+        assert out == "('xy', '', '')"
+
+    def test_rpartition_no_match_puts_string_last(self):
+        """rpartition differs from partition here — the string goes last."""
+        out, _, rc = clython_run("print('xy'.rpartition('-'))")
+        assert rc == 0
+        assert out == "('', '', 'xy')"
+
+
+class TestStrPredicates:
+    def test_swapcase(self):
+        out, _, rc = clython_run("print(repr('aB'.swapcase()))")
+        assert rc == 0
+        assert out == "'Ab'"
+
+    def test_isalnum_isspace(self):
+        out, _, rc = clython_run("print('a1'.isalnum(), ' '.isspace())")
+        assert rc == 0
+        assert out == "True True"
+
+    def test_isupper_islower_need_a_cased_char(self):
+        """'123'.isupper() is False — digits are not cased."""
+        out, _, rc = clython_run("print('ABC'.isupper(), '123'.isupper(), 'abc'.islower())")
+        assert rc == 0
+        assert out == "True False True"
+
+
+class TestStrSplitlines:
+    def test_splitlines_basic(self):
+        out, _, rc = clython_run(r"print('a\nb'.splitlines())")
+        assert rc == 0
+        assert out == "['a', 'b']"
+
+    def test_splitlines_trailing_break_adds_no_empty(self):
+        out, _, rc = clython_run(r"print('a\n'.splitlines(), ''.splitlines())")
+        assert rc == 0
+        assert out == "['a'] []"
+
+    def test_splitlines_treats_crlf_as_one_break(self):
+        out, _, rc = clython_run(r"print('a\r\nb'.splitlines())")
+        assert rc == 0
+        assert out == "['a', 'b']"
