@@ -398,3 +398,50 @@ class TestKeywordModule:
         out, _, rc = clython_run("import keyword\nprint('for' in keyword.kwlist)")
         assert rc == 0
         assert out == "True"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# dir() on modules
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDirOnModules:
+    """dir(module) must list the module's contents.
+
+    Regression guard: py-module is a subclass of py-object, and the builtin
+    dir() tested py-object first, so a module matched that branch and dir()
+    read its (empty) instance dict instead of its module dict. Every
+    dir(some_module) call returned []. The existing section-4 test only
+    asserted that `dir(sys)` *parses*, so nothing caught it.
+    """
+
+    def test_dir_module_is_not_empty(self):
+        out, _, rc = clython_run("import math\nprint(len(dir(math)) > 0)")
+        assert rc == 0
+        assert out == "True"
+
+    def test_dir_module_lists_known_functions(self):
+        out, _, rc = clython_run(
+            "import math\nd = dir(math)\nprint('sqrt' in d, 'floor' in d)"
+        )
+        assert rc == 0
+        assert out == "True True"
+
+    def test_dir_module_is_sorted(self):
+        out, _, rc = clython_run("import json\nd = dir(json)\nprint(d == sorted(d))")
+        assert rc == 0
+        assert out == "True"
+
+    def test_dir_module_includes_dunder_name(self):
+        out, _, rc = clython_run("import string\nprint('__name__' in dir(string))")
+        assert rc == 0
+        assert out == "True"
+
+    def test_dir_across_several_modules(self):
+        out, _, rc = clython_run(
+            "import itertools, json, string\n"
+            "print('islice' in dir(itertools), 'dumps' in dir(json), "
+            "'digits' in dir(string))"
+        )
+        assert rc == 0
+        assert out == "True True True"
