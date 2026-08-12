@@ -398,3 +398,116 @@ class TestKeywordModule:
         out, _, rc = clython_run("import keyword\nprint('for' in keyword.kwlist)")
         assert rc == 0
         assert out == "True"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# builtin keyword arguments
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBuiltinKeywordArgs:
+    """Builtins must honour their keyword arguments, not just positional ones.
+
+    Regression guard: several builtins read only `(second args)` and never
+    consulted *current-kwargs*, so the keyword form was silently ignored and
+    produced a wrong answer rather than an error. enumerate(x, start=1) counted
+    from 0; int('10', base=2) parsed as decimal; round(x, ndigits=2) ignored the
+    precision; min/max(default=...) raised ValueError on an empty sequence.
+    """
+
+    def test_enumerate_start_keyword(self):
+        out, _, rc = clython_run("print(list(enumerate('ab', start=1)))")
+        assert rc == 0
+        assert out == "[(1, 'a'), (2, 'b')]"
+
+    def test_enumerate_start_positional_still_works(self):
+        out, _, rc = clython_run("print(list(enumerate('ab', 1)))")
+        assert rc == 0
+        assert out == "[(1, 'a'), (2, 'b')]"
+
+    def test_enumerate_default_start_is_zero(self):
+        out, _, rc = clython_run("print(list(enumerate('ab')))")
+        assert rc == 0
+        assert out == "[(0, 'a'), (1, 'b')]"
+
+    def test_int_base_keyword(self):
+        out, _, rc = clython_run("print(int('10', base=2), int('ff', base=16))")
+        assert rc == 0
+        assert out == "2 255"
+
+    def test_int_base_positional_still_works(self):
+        out, _, rc = clython_run("print(int('ff', 16))")
+        assert rc == 0
+        assert out == "255"
+
+    def test_round_ndigits_keyword(self):
+        out, _, rc = clython_run("print(round(3.14159, ndigits=2))")
+        assert rc == 0
+        assert out == "3.14"
+
+    def test_round_ndigits_positional_still_works(self):
+        out, _, rc = clython_run("print(round(3.14159, 2))")
+        assert rc == 0
+        assert out == "3.14"
+
+    def test_max_default_on_empty(self):
+        out, _, rc = clython_run("print(max([], default=9))")
+        assert rc == 0
+        assert out == "9"
+
+    def test_min_default_on_empty(self):
+        out, _, rc = clython_run("print(min([], default=0))")
+        assert rc == 0
+        assert out == "0"
+
+    def test_default_ignored_when_sequence_is_non_empty(self):
+        out, _, rc = clython_run("print(min([1, 2], default=99), max([1, 2], default=99))")
+        assert rc == 0
+        assert out == "1 2"
+
+    def test_max_key_returns_original_item(self):
+        """key= selects by f(item) but returns the item itself.
+
+        Regression guard: min/max read `default` from kwargs but ignored
+        `key` entirely, so max([1,2], key=lambda x:-x) returned 2 instead
+        of 1 — silently wrong, no error.
+        """
+        out, _, rc = clython_run("print(max([1, 2], key=lambda x: -x))")
+        assert rc == 0
+        assert out == "1"
+
+    def test_min_key_returns_original_item(self):
+        out, _, rc = clython_run("print(min([1, 2], key=lambda x: -x))")
+        assert rc == 0
+        assert out == "2"
+
+    def test_max_key_on_varargs(self):
+        out, _, rc = clython_run("print(max('a', 'bb', key=len))")
+        assert rc == 0
+        assert out == "bb"
+
+    def test_min_key_on_tuples(self):
+        out, _, rc = clython_run(
+            "print(min([(1, 'b'), (2, 'a')], key=lambda t: t[1]))"
+        )
+        assert rc == 0
+        assert out == "(2, 'a')"
+
+    def test_min_max_key_keeps_first_on_ties(self):
+        """CPython returns the first extreme item when keys compare equal."""
+        out, _, rc = clython_run(
+            "a = [(1, 'x'), (2, 'x')]\n"
+            "print(max(a, key=lambda t: t[1]), min(a, key=lambda t: t[1]))"
+        )
+        assert rc == 0
+        assert out == "(1, 'x') (1, 'x')"
+
+    def test_min_max_still_raise_without_default(self):
+        out, _, rc = clython_run(
+            "try:\n"
+            "    min([])\n"
+            "except ValueError:\n"
+            "    print('raised')"
+        )
+        assert rc == 0
+        assert out == "raised"
