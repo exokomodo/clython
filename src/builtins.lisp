@@ -772,9 +772,13 @@
               ;; Default: collect names from instance dict + class hierarchy
               (let ((names nil))
                 ;; Instance dict
+                ;; NOTE: py-module is a subclass of py-object, so it must be
+                ;; tested FIRST — otherwise a module matches the py-object
+                ;; branch and we read its (empty) instance dict instead of its
+                ;; module dict, making dir(some_module) return [].
                 (let ((d (cond
-                           ((typep obj 'py-object) (py-object-dict obj))
                            ((typep obj 'py-module) (py-module-dict obj))
+                           ((typep obj 'py-object) (py-object-dict obj))
                            (t nil))))
                   (when (hash-table-p d)
                     (maphash (lambda (k v)
