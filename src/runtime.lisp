@@ -2203,7 +2203,13 @@
     ((string= name "__doc__")  (let ((doc (py-function-docstring obj)))
                                 (if doc (make-py-str doc) +py-none+)))
     ((string= name "__annotations__") (make-py-dict))  ; stub — annotations not tracked yet
-    (t (call-next-method))))
+    (t
+     ;; Check the function's per-instance attribute dict (set by e.g. lru_cache wrappers).
+     (let ((fdict (py-object-dict obj)))
+       (when fdict
+         (multiple-value-bind (val found) (gethash name fdict)
+           (when found (return-from py-getattr val)))))
+     (call-next-method))))
 
 (defmethod py-getattr ((obj py-type) (name string))
   ;; Built-in attributes for type objects
