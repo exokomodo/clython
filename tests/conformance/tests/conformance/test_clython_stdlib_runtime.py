@@ -438,7 +438,7 @@ class TestStrExpandtabs:
         """Column restarts after a newline, so the tab expands to 3 spaces.
 
         Compared via == rather than repr(): repr() does not yet escape
-        control characters (see issue #220), which is a separate bug.
+        control characters (see issue #221), which is a separate bug.
         """
         out, _, rc = clython_run(
             r"print('a\nb\tc'.expandtabs(4) == 'a' + chr(10) + 'b   c')"
