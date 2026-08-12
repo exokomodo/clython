@@ -139,7 +139,8 @@
   (if (null args)
       (make-py-int 0)
       (let ((obj (first args))
-            (base (second args)))
+            (base (or (second args)
+                      (cdr (assoc "base" *current-kwargs* :test #'string=)))))
         (cond
           ((typep obj 'py-int)   obj)
           ((typep obj 'py-float) (make-py-int (truncate (py-float-value obj))))
@@ -447,6 +448,10 @@
   (py-abs obj))
 
 (defbuiltin +builtin-round+ "round" (number &optional (ndigits nil ndigits-p))
+  ;; round(x, ndigits=n) — accept the keyword form as well as positional.
+  (let ((kw (cdr (assoc "ndigits" *current-kwargs* :test #'string=))))
+    (when (and kw (not ndigits-p))
+      (setf ndigits kw ndigits-p t)))
   (let ((val (cond
                ((typep number 'py-int) (py-int-value number))
                ((typep number 'py-float) (py-float-value number))
@@ -471,20 +476,42 @@
                         (not (typep (first args) 'py-int))
                         (not (typep (first args) 'py-float)))
                    (collect-iter (first args))
-                   args)))
-    (when (null items)
-      (clython.runtime:py-raise "ValueError" "min() arg is an empty sequence"))
-    (reduce (lambda (a b) (if (py-lt a b) a b)) items)))
+                   args))
+        (default (cdr (assoc "default" *current-kwargs* :test #'string=)))
+        (key-fn (cdr (assoc "key" *current-kwargs* :test #'string=))))
+    ;; default= applies only to an empty sequence; with items present CPython
+    ;; ignores it.
+    (cond
+      ((and (null items) default) default)
+      ((null items)
+       (clython.runtime:py-raise "ValueError" "min() arg is an empty sequence"))
+      ;; key= compares f(a) against f(b) but still returns the original item.
+      ;; CPython keeps the first item on ties, so compare strictly.
+      (key-fn (reduce (lambda (a b)
+                        (if (py-lt (py-call key-fn b) (py-call key-fn a)) b a))
+                      items))
+      (t (reduce (lambda (a b) (if (py-lt a b) a b)) items)))))
 
 (defbuiltin +builtin-max+ "max" (&rest args)
   (let ((items (if (and (= (length args) 1)
                         (not (typep (first args) 'py-int))
                         (not (typep (first args) 'py-float)))
                    (collect-iter (first args))
-                   args)))
-    (when (null items)
-      (clython.runtime:py-raise "ValueError" "max() arg is an empty sequence"))
-    (reduce (lambda (a b) (if (py-gt a b) a b)) items)))
+                   args))
+        (default (cdr (assoc "default" *current-kwargs* :test #'string=)))
+        (key-fn (cdr (assoc "key" *current-kwargs* :test #'string=))))
+    ;; default= applies only to an empty sequence; with items present CPython
+    ;; ignores it.
+    (cond
+      ((and (null items) default) default)
+      ((null items)
+       (clython.runtime:py-raise "ValueError" "max() arg is an empty sequence"))
+      ;; key= compares f(a) against f(b) but still returns the original item.
+      ;; CPython keeps the first item on ties, so compare strictly.
+      (key-fn (reduce (lambda (a b)
+                        (if (py-gt (py-call key-fn b) (py-call key-fn a)) b a))
+                      items))
+      (t (reduce (lambda (a b) (if (py-gt a b) a b)) items)))))
 
 (defbuiltin +builtin-divmod+ "divmod" (a b)
   ;; Check for user-defined __divmod__ first
@@ -639,7 +666,9 @@
 
 (defbuiltin +builtin-enumerate+ "enumerate" (&rest args)
   (let* ((iterable (first args))
-         (start (if (second args) (py-int-value (second args)) 0))
+         (start-arg (or (second args)
+                        (cdr (assoc "start" *current-kwargs* :test #'string=))))
+         (start (if start-arg (py-int-value start-arg) 0))
          (it (py-iter iterable))
          (counter start))
     (make-py-iterator
