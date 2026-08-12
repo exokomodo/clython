@@ -398,3 +398,47 @@ class TestKeywordModule:
         out, _, rc = clython_run("import keyword\nprint('for' in keyword.kwlist)")
         assert rc == 0
         assert out == "True"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# dict() constructor key normalisation
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestDictConstructorKeys:
+    """dict() must normalise keys the way dict literals and d[k]=v do.
+
+    Regression guard: the dict() builtin wrote straight into the hash table
+    and only unwrapped py-str, so dict([(1, 'a')]) produced a key that no
+    lookup could ever match — `1 in d` was False and d[1] raised KeyError,
+    while the equivalent literal {1: 'a'} worked fine.
+    """
+
+    def test_int_keys_are_usable(self):
+        out, _, rc = clython_run("d = dict([(1, 'a')])\nprint(d, 1 in d, d[1])")
+        assert rc == 0
+        assert out == "{1: 'a'} True a"
+
+    def test_from_zip_with_int_keys(self):
+        out, _, rc = clython_run(
+            "d = dict(zip([1, 2], [3, 4]))\nprint(d[1], d[2])"
+        )
+        assert rc == 0
+        assert out == "3 4"
+
+    def test_str_keys_still_work(self):
+        out, _, rc = clython_run(
+            "d = dict([('a', 1)])\nprint(d, 'a' in d, d['a'])"
+        )
+        assert rc == 0
+        assert out == "{'a': 1} True 1"
+
+    def test_later_duplicate_key_wins(self):
+        out, _, rc = clython_run("print(dict([(1, 'a'), (1, 'b')])[1])")
+        assert rc == 0
+        assert out == "b"
+
+    def test_dict_from_dict_still_works(self):
+        out, _, rc = clython_run("d = dict({1: 2})\nprint(d[1])")
+        assert rc == 0
+        assert out == "2"

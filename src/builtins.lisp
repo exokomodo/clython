@@ -417,13 +417,15 @@
                       (setf (gethash k (py-dict-value result)) v))
                     (py-dict-value src)))
           (t
-           ;; iterable of 2-element iterables
+           ;; iterable of 2-element iterables.
+           ;; Route through py-setitem so keys are normalised the same way
+           ;; dict literals and d[k]=v are. Storing into the hash table
+           ;; directly only unwrapped py-str, so dict([(1,"a")]) produced a
+           ;; key no lookup could ever match.
            (dolist (pair (collect-iter src))
-             (let* ((k   (py-getitem pair (make-py-int 0)))
-                    (v   (py-getitem pair (make-py-int 1)))
-                    ;; normalise py-str keys to CL strings for hash lookup
-                    (hk  (if (typep k 'py-str) (py-str-value k) k)))
-               (setf (gethash hk (py-dict-value result)) v)))))))
+             (let ((k (py-getitem pair (make-py-int 0)))
+                   (v (py-getitem pair (make-py-int 1))))
+               (py-setitem result k v)))))))
     ;; Merge keyword arguments (keys are already CL strings from the evaluator)
     (dolist (kw *current-kwargs*)
       (setf (gethash (car kw) (py-dict-value result)) (cdr kw)))
